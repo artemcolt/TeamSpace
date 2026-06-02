@@ -10,6 +10,7 @@ interface ViewBounds {
 interface MailViewState {
   canGoBack: boolean;
   loading: boolean;
+  url: string;
   error: string;
 }
 
@@ -55,9 +56,9 @@ interface TeamSpaceBridge {
     hideMailView: () => Promise<void>;
     goBackMailView: () => Promise<void>;
     reloadMailView: () => Promise<void>;
-    getMailCredentialsStatus: () => Promise<{ username: string; hasPassword: boolean }>;
-    saveMailCredentials: (payload: { username: string; password?: string }) => Promise<{ username: string; hasPassword: boolean }>;
-    deleteMailCredentials: () => Promise<{ username: string; hasPassword: boolean }>;
+    getMailCredentialsStatus: () => Promise<{ url: string; username: string; hasPassword: boolean }>;
+    saveMailCredentials: (payload: { url?: string; username: string; password?: string }) => Promise<{ url: string; username: string; hasPassword: boolean }>;
+    deleteMailCredentials: () => Promise<{ url: string; username: string; hasPassword: boolean }>;
     showBrowserView: (payload: { bounds: ViewBounds; url?: string }) => Promise<BrowserViewState>;
     setBrowserBounds: (bounds: ViewBounds) => Promise<void>;
     hideBrowserView: () => Promise<void>;
@@ -102,8 +103,6 @@ interface TeamSpaceBridge {
     saveRecording: (payload: { fileName: string; data: ArrayBuffer }) => Promise<RecordingSaveResult>;
     openRecordingFolder: (directory: string) => Promise<string>;
     requestTelegramCode: (payload: {
-      apiId: string;
-      apiHash: string;
       phone: string;
       proxyUrl?: string;
     }) => Promise<AppState>;

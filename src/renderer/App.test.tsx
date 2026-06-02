@@ -171,17 +171,31 @@ function installBridge(initialState: AppState) {
     copyText: vi.fn(async () => undefined),
     readTextFile: vi.fn(async () => '# AI description'),
     writeTextFile: vi.fn(async () => undefined),
-    showMailView: vi.fn(async () => ({ canGoBack: false, loading: false, error: '' })),
+    showMailView: vi.fn(async () => ({
+      canGoBack: false,
+      loading: false,
+      url: 'https://mail.example.com/',
+      error: ''
+    })),
     setMailBounds: vi.fn(async () => undefined),
     hideMailView: vi.fn(async () => undefined),
     goBackMailView: vi.fn(async () => undefined),
     reloadMailView: vi.fn(async () => undefined),
-    getMailCredentialsStatus: vi.fn(async () => ({ username: '', hasPassword: false })),
-    saveMailCredentials: vi.fn(async (payload: { username: string }) => ({
+    getMailCredentialsStatus: vi.fn(async () => ({
+      url: 'https://mail.example.com/',
+      username: '',
+      hasPassword: false
+    })),
+    saveMailCredentials: vi.fn(async (payload: { url?: string; username: string }) => ({
+      url: payload.url ?? 'https://mail.example.com/',
       username: payload.username,
       hasPassword: true
     })),
-    deleteMailCredentials: vi.fn(async () => ({ username: '', hasPassword: false })),
+    deleteMailCredentials: vi.fn(async () => ({
+      url: 'https://mail.example.com/',
+      username: '',
+      hasPassword: false
+    })),
     showBrowserView: vi.fn(async (payload: { url?: string }) => ({
       canGoBack: false,
       loading: false,
@@ -740,18 +754,16 @@ describe('App', () => {
     await screen.findByRole('button', { name: 'Telegram' });
     await user.click(screen.getByRole('button', { name: 'Telegram' }));
     await user.click(screen.getByRole('button', { name: 'Далее' }));
-    await user.type(screen.getByLabelText('Telegram api_id'), '123456');
-    await user.type(screen.getByLabelText('Telegram api_hash'), 'hash');
-    await user.click(screen.getByRole('button', { name: 'Далее' }));
     await user.type(screen.getByLabelText('Номер телефона'), '+10000000000');
     await user.click(screen.getByRole('button', { name: 'Далее' }));
 
-    expect(api.requestTelegramCode).toHaveBeenCalledWith({
-      apiId: '123456',
-      apiHash: 'hash',
-      phone: '+10000000000',
-      proxyUrl: ''
-    });
+    expect(api.requestTelegramCode).toHaveBeenCalledWith(expect.objectContaining({
+      phone: '+10000000000'
+    }));
+    expect(api.requestTelegramCode).not.toHaveBeenCalledWith(expect.objectContaining({
+      apiId: expect.any(String),
+      apiHash: expect.any(String)
+    }));
     expect(await screen.findByText(/Код запрошен через Telegram/)).toBeInTheDocument();
   });
 
@@ -1525,6 +1537,36 @@ describe('App', () => {
     );
   });
 
+  it('shows mail connection settings when the embedded mail page fails', async () => {
+    const api = installBridge(connectedState());
+    vi.mocked(api.showMailView).mockResolvedValueOnce({
+      canGoBack: false,
+      loading: false,
+      url: 'https://mail.example.com/',
+      error: "ERR_CONNECTION_RESET (-101) loading 'https://mail.example.com/'"
+    });
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByRole('button', { name: 'Почта' }));
+    await screen.findByRole('heading', { name: 'Почта не открылась' });
+
+    await user.clear(screen.getByLabelText('Ссылка почты'));
+    await user.type(screen.getByLabelText('Ссылка почты'), 'https://mail.gt-sot.ru/');
+    await user.type(screen.getByLabelText('Логин'), 'mail-user');
+    await user.type(screen.getByLabelText('Пароль'), 'mail-password');
+    await user.click(screen.getByRole('button', { name: 'Сохранить и открыть почту' }));
+
+    await waitFor(() =>
+      expect(api.saveMailCredentials).toHaveBeenCalledWith({
+        url: 'https://mail.gt-sot.ru/',
+        username: 'mail-user',
+        password: 'mail-password'
+      })
+    );
+    await waitFor(() => expect(api.showMailView).toHaveBeenCalledTimes(2));
+  });
+
   it('shows Telemost actions and invites Katya from a message link', async () => {
     const state = connectedState();
     state.telegram.messages[0].text = 'https://telemost.yandex.ru/j/00000000000001';
@@ -1957,6 +1999,28 @@ describe('App', () => {
         url: 'https://telemost.yandex.ru/j/00000000000000'
       }))
     );
+    expect(await screen.findByText('https://telemost.yandex.ru/j/00000000000000')).toBeInTheDocument();
+  });
+
+  it('saves Telemost links in Meetings and restores them from the list', async () => {
+    installBridge(connectedState());
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByRole('button', { name: 'Встречи' }));
+    const telemostInput = screen.getByLabelText('Ссылка Телемоста');
+    await user.clear(telemostInput);
+    await user.type(telemostInput, 'https://telemost.yandex.ru/j/12345678901234');
+    await user.click(screen.getByRole('button', { name: 'Сохранить встречу' }));
+
+    await screen.findByText('https://telemost.yandex.ru/j/12345678901234');
+    expect(screen.getByText('Ссылка на встречу сохранена.')).toBeInTheDocument();
+
+    await user.clear(telemostInput);
+    await user.type(telemostInput, 'https://telemost.yandex.ru/j/00000000000000');
+    await user.click(screen.getByText('https://telemost.yandex.ru/j/12345678901234'));
+
+    expect(telemostInput).toHaveValue('https://telemost.yandex.ru/j/12345678901234');
   });
 
   it('passes a custom meeting analysis prompt from the setup dialog', async () => {

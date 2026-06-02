@@ -11,8 +11,8 @@ import { telegramUnreadNotificationCount } from './domain/appState';
 import type { AppState } from './domain/types';
 
 const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
-const MAIL_URL = 'https://mail.example.com/';
-const MAIL_HOSTNAME = 'mail.example.com';
+const MAIL_DEFAULT_URL = 'https://mail.example.com/';
+const MAIL_URL_ENV_KEY = 'TEAM_SPACE_MAIL_URL';
 const CHATGPT_URL = 'https://chatgpt.com/';
 const CHATGPT_LOGIN_URL = 'https://chatgpt.com/auth/login';
 const CHATGPT_PERSISTABLE_HOSTS = new Set([
@@ -26,9 +26,6 @@ const GOOGLE_AUTH_HOSTS = new Set([
 ]);
 const APP_NAME = 'Workspace';
 const USER_DATA_DIRECTORY_NAME = 'team-space-desktop';
-const BROWSER_PROXY_ENV_KEY = 'TEAM_SPACE_BROWSER_PROXY_URL';
-const BROWSER_PROXY_USERNAME_ENV_KEY = 'TEAM_SPACE_BROWSER_PROXY_USERNAME';
-const BROWSER_PROXY_PASSWORD_ENV_KEY = 'TEAM_SPACE_BROWSER_PROXY_PASSWORD';
 
 app.setName(APP_NAME);
 app.setPath('userData', path.join(app.getPath('appData'), USER_DATA_DIRECTORY_NAME));
@@ -125,13 +122,39 @@ function chatGptSession(): Electron.Session {
   return session.fromPartition('persist:chatgpt');
 }
 
+function normalizeMailUrl(value: string): string {
+  const candidate = value.trim() || MAIL_DEFAULT_URL;
+  let url: URL;
+  try {
+    url = new URL(candidate);
+  } catch {
+    throw new Error('Введите корректную ссылку почты.');
+  }
+  if (url.protocol !== 'https:' && url.protocol !== 'http:') {
+    throw new Error('Ссылка почты должна начинаться с http:// или https://.');
+  }
+  return url.toString();
+}
+
+function currentMailUrl(): string {
+  const savedUrl = store.getSecret('gtsMailUrl');
+  if (savedUrl) {
+    return normalizeMailUrl(savedUrl);
+  }
+  return normalizeMailUrl(process.env[MAIL_URL_ENV_KEY] ?? MAIL_DEFAULT_URL);
+}
+
+function currentMailHostname(): string {
+  return new URL(currentMailUrl()).hostname;
+}
+
 function isMailUrl(url: string): boolean {
   if (url === 'about:blank') {
     return true;
   }
 
   try {
-    return new URL(url).hostname === MAIL_HOSTNAME;
+    return new URL(url).hostname === currentMailHostname();
   } catch {
     return false;
   }
@@ -161,7 +184,7 @@ function serializeMailCookie(cookie: Electron.Cookie): StoredMailCookie {
 
 function cookieSetDetails(cookie: StoredMailCookie): Electron.CookiesSetDetails {
   return {
-    url: MAIL_URL,
+    url: currentMailUrl(),
     name: cookie.name,
     value: cookie.value,
     domain: cookie.domain,
@@ -189,28 +212,45 @@ function readMailCredentials(): StoredMailCredentials | null {
   }
 }
 
-function mailCredentialsStatus(): { username: string; hasPassword: boolean } {
+function mailCredentialsStatus(): { url: string; username: string; hasPassword: boolean } {
   const credentials = readMailCredentials();
   return {
+    url: currentMailUrl(),
     username: credentials?.username ?? '',
     hasPassword: Boolean(credentials?.password)
   };
 }
 
-function saveMailCredentials(payload: { username: string; password?: string }): { username: string; hasPassword: boolean } {
+function saveMailCredentials(payload: { url?: string; username: string; password?: string }): {
+  url: string;
+  username: string;
+  hasPassword: boolean;
+} {
+  const previousUrl = currentMailUrl();
+  const nextUrl = normalizeMailUrl(payload.url ?? previousUrl);
   const username = payload.username.trim();
   const password = payload.password ?? '';
   const currentCredentials = readMailCredentials();
   const nextPassword = password || currentCredentials?.password || '';
-  if (!username || !nextPassword) {
+  if ((username || password || currentCredentials) && (!username || !nextPassword)) {
     throw new Error('Введите логин и пароль почты.');
   }
 
-  store.setSecret('gtsMailCredentials', JSON.stringify({ username, password: nextPassword }));
+  store.setSecret('gtsMailUrl', nextUrl);
+  if (username && nextPassword) {
+    store.setSecret('gtsMailCredentials', JSON.stringify({ username, password: nextPassword }));
+  }
+  if (previousUrl !== nextUrl) {
+    mailError = '';
+    store.deleteSecret('gtsMailCookies');
+    if (mailView && !mailView.webContents.isDestroyed()) {
+      void mailView.webContents.loadURL(nextUrl);
+    }
+  }
   return mailCredentialsStatus();
 }
 
-function deleteMailCredentials(): { username: string; hasPassword: boolean } {
+function deleteMailCredentials(): { url: string; username: string; hasPassword: boolean } {
   store.deleteSecret('gtsMailCredentials');
   return mailCredentialsStatus();
 }
@@ -265,7 +305,7 @@ async function autofillMailLogin(): Promise<void> {
 
 async function persistMailCookies(): Promise<void> {
   try {
-    const cookies = await mailSession().cookies.get({ url: MAIL_URL });
+    const cookies = await mailSession().cookies.get({ url: currentMailUrl() });
     store.setSecret('gtsMailCookies', JSON.stringify(cookies.map(serializeMailCookie)));
     await mailSession().cookies.flushStore();
   } catch {
@@ -305,7 +345,8 @@ function configureMailCookies(): void {
 
   mailCookiesConfigured = true;
   mailSession().cookies.on('changed', (_event, cookie, _cause, removed) => {
-    if (!cookie.domain?.includes(MAIL_HOSTNAME) && !cookie.domain?.includes('example.com')) {
+    const hostname = currentMailHostname();
+    if (!cookie.domain?.includes(hostname)) {
       return;
     }
 
@@ -326,6 +367,7 @@ function sendMailState(): void {
   mainWindow.webContents.send('mail:state-changed', {
     canGoBack: mailView?.webContents.navigationHistory.canGoBack() ?? false,
     loading: mailView?.webContents.isLoading() ?? false,
+    url: mailView?.webContents.getURL() || currentMailUrl(),
     error: mailError
   });
 }
@@ -434,7 +476,6 @@ function createBrowserView(): BrowserView {
       sandbox: true
     }
   });
-  configureBrowserProxy(view.webContents.session);
 
   view.webContents.setWindowOpenHandler(({ url }) => {
     if (isBrowserUrl(url)) {
@@ -462,32 +503,8 @@ function createBrowserView(): BrowserView {
     browserError = errorDescription || 'Не удалось загрузить страницу.';
     sendBrowserState();
   });
-  view.webContents.on('login', (event, _details, authInfo, callback) => {
-    const username = process.env[BROWSER_PROXY_USERNAME_ENV_KEY]?.trim();
-    const password = process.env[BROWSER_PROXY_PASSWORD_ENV_KEY]?.trim();
-    if (!authInfo.isProxy || !username || !password) {
-      return;
-    }
-
-    event.preventDefault();
-    callback(username, password);
-  });
 
   return view;
-}
-
-function configureBrowserProxy(browserSession: Electron.Session): void {
-  const proxyRules = process.env[BROWSER_PROXY_ENV_KEY]?.trim();
-  if (!proxyRules) {
-    return;
-  }
-
-  void browserSession.setProxy({
-    proxyRules,
-    proxyBypassRules: '<local>'
-  }).then(() => browserSession.closeAllConnections()).catch((error: unknown) => {
-    browserError = error instanceof Error ? error.message : 'Не удалось применить proxy для встроенного браузера.';
-  });
 }
 
 function warmUpBrowserView(): void {
@@ -716,11 +733,11 @@ function createMailView(): BrowserView {
     sendMailState();
   });
   restoreMailCookies()
-    .then(() => view.webContents.loadURL(MAIL_URL))
+    .then(() => view.webContents.loadURL(currentMailUrl()))
     .catch((error: unknown) => {
-    mailError = error instanceof Error ? error.message : 'Не удалось загрузить почту.';
-    sendMailState();
-  });
+      mailError = error instanceof Error ? error.message : 'Не удалось загрузить почту.';
+      sendMailState();
+    });
 
   return view;
 }
@@ -768,6 +785,7 @@ function registerMailViewIpc(): void {
     return {
       canGoBack: mailView?.webContents.navigationHistory.canGoBack() ?? false,
       loading: mailView?.webContents.isLoading() ?? false,
+      url: mailView?.webContents.getURL() || currentMailUrl(),
       error: mailError
     };
   });
@@ -794,7 +812,7 @@ function registerMailViewIpc(): void {
 
   ipcMain.handle('mail:get-credentials-status', () => mailCredentialsStatus());
 
-  ipcMain.handle('mail:save-credentials', (_event, payload: { username: string; password?: string }) => {
+  ipcMain.handle('mail:save-credentials', (_event, payload: { url?: string; username: string; password?: string }) => {
     const result = saveMailCredentials(payload);
     void autofillMailLogin();
     return result;

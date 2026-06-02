@@ -439,6 +439,7 @@ export interface SecretFile {
   telegramApiCredentials?: string;
   telegramProxyUrl?: string;
   gitlabToken?: string;
+  gtsMailUrl?: string;
   gtsMailCookies?: string;
   gtsMailCredentials?: string;
   chatGptLastUrl?: string;

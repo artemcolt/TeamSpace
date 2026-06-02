@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { api } from '../../domain/bridge';
 
 export function MailCredentialsPanel({ busy }: { busy: boolean }) {
+  const [url, setUrl] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [hasPassword, setHasPassword] = useState(false);
@@ -16,6 +17,7 @@ export function MailCredentialsPanel({ busy }: { busy: boolean }) {
         if (cancelled) {
           return;
         }
+        setUrl(status.url);
         setUsername(status.username);
         setHasPassword(status.hasPassword);
       })
@@ -31,9 +33,11 @@ export function MailCredentialsPanel({ busy }: { busy: boolean }) {
     setError('');
     try {
       const status = await api.saveMailCredentials({
+        url,
         username,
         password: password || undefined
       });
+      setUrl(status.url);
       setUsername(status.username);
       setPassword('');
       setHasPassword(status.hasPassword);
@@ -51,6 +55,7 @@ export function MailCredentialsPanel({ busy }: { busy: boolean }) {
     setError('');
     try {
       const status = await api.deleteMailCredentials();
+      setUrl(status.url);
       setUsername(status.username);
       setPassword('');
       setHasPassword(status.hasPassword);
@@ -70,6 +75,14 @@ export function MailCredentialsPanel({ busy }: { busy: boolean }) {
         Cookies почты сохраняются отдельно, но если сервер завершает сессию, сохраненные здесь данные будут
         подставлены в форму входа. Пароль хранится только в системном защищенном хранилище.
       </p>
+      <label className="field">
+        <span>Ссылка почты</span>
+        <input
+          value={url}
+          onChange={(event) => setUrl(event.target.value)}
+          placeholder="https://mail.example.com/"
+        />
+      </label>
       <label className="field">
         <span>Логин</span>
         <input
@@ -94,7 +107,7 @@ export function MailCredentialsPanel({ busy }: { busy: boolean }) {
       <div className="actions">
         <button
           className="primary-action"
-          disabled={busy || saving || !username.trim() || (!password && !hasPassword)}
+          disabled={busy || saving || !url.trim() || !username.trim() || (!password && !hasPassword)}
           onClick={() => void saveCredentials()}
         >
           {saving ? 'Сохраняем...' : 'Сохранить'}

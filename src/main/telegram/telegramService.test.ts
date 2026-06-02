@@ -38,13 +38,13 @@ describe('TelegramService stored credentials', () => {
     });
     const service = new TelegramService(store);
 
-    await expect(service.sync()).rejects.toThrow('Telegram api_id/api_hash не сохранены');
+    await expect(service.sync()).rejects.toThrow('Telegram api_id/api_hash не настроены');
 
     expect(store.setState).toHaveBeenCalledOnce();
     expect(store.getState().telegram).toMatchObject({
       status: 'error',
       hasApiCredentials: false,
-      error: 'Telegram api_id/api_hash не сохранены. Откройте настройки Telegram и сохраните ключи заново.'
+      error: 'Telegram api_id/api_hash не настроены. Заполните TELEGRAM_API_ID и TELEGRAM_API_HASH в .env.'
     });
   });
 });

@@ -4,11 +4,19 @@ import { katyaAccessGroupStorageKey, katyaDefaultBaseUrl } from '../../domain/co
 
 const defaultTelemostUrl = 'https://telemost.yandex.ru/j/00000000000000';
 const katyaMeetingStorageKey = 'team-space:katya-meeting-id';
+const savedTelemostLinksStorageKey = 'team-space:saved-telemost-links:v1';
 const katyaMeetingsPageSize = 20;
 
 type MeetingsMode = 'call' | 'recordings' | 'analyses';
 type MeetingDetailTab = 'transcript' | 'protocol';
 type AnalysisTemplateId = 'daily' | 'actions' | 'risks' | 'people' | 'custom';
+type SavedTelemostLink = {
+  url: string;
+  title: string;
+  createdAt: string;
+  katyaMeetingId?: string;
+  accessGroupId?: string;
+};
 
 const analysisPromptTemplates: Array<{ id: AnalysisTemplateId; title: string; prompt: string }> = [
   {
@@ -75,6 +83,45 @@ function isTelemostUrl(value: string): boolean {
   } catch {
     return false;
   }
+}
+
+function readSavedTelemostLinks(): SavedTelemostLink[] {
+  const rawValue = window.localStorage.getItem(savedTelemostLinksStorageKey);
+  if (!rawValue) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(rawValue);
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+
+    const uniqueLinks = new Map<string, SavedTelemostLink>();
+    for (const item of parsed) {
+      if (!item || typeof item !== 'object') {
+        continue;
+      }
+      const url = typeof item.url === 'string' ? normalizeTelemostUrl(item.url) : '';
+      if (!url || !isTelemostUrl(url) || uniqueLinks.has(url)) {
+        continue;
+      }
+      uniqueLinks.set(url, {
+        url,
+        title: typeof item.title === 'string' && item.title.trim() ? item.title.trim() : 'Созвон',
+        createdAt: typeof item.createdAt === 'string' ? item.createdAt : new Date().toISOString(),
+        katyaMeetingId: typeof item.katyaMeetingId === 'string' ? item.katyaMeetingId : undefined,
+        accessGroupId: typeof item.accessGroupId === 'string' ? item.accessGroupId : undefined
+      });
+    }
+    return Array.from(uniqueLinks.values());
+  } catch {
+    return [];
+  }
+}
+
+function writeSavedTelemostLinks(links: SavedTelemostLink[]): void {
+  window.localStorage.setItem(savedTelemostLinksStorageKey, JSON.stringify(links));
 }
 
 function dailyTitle(): string {
@@ -322,6 +369,7 @@ export function Meetings({ onOpenSettings }: { onOpenSettings: () => void }) {
   const [accessGroupId, setAccessGroupId] = useState(() =>
     window.localStorage.getItem(katyaAccessGroupStorageKey) ?? ''
   );
+  const [savedTelemostLinks, setSavedTelemostLinks] = useState<SavedTelemostLink[]>(readSavedTelemostLinks);
   const [busy, setBusy] = useState(false);
   const [statusText, setStatusText] = useState('Готово к дейлику.');
 
@@ -366,6 +414,12 @@ export function Meetings({ onOpenSettings }: { onOpenSettings: () => void }) {
     ),
     [savedAnalyses]
   );
+  const sortedSavedTelemostLinks = useMemo(
+    () => [...savedTelemostLinks].sort((first, second) =>
+      new Date(second.createdAt || 0).getTime() - new Date(first.createdAt || 0).getTime()
+    ),
+    [savedTelemostLinks]
+  );
 
   useEffect(() => {
     api.getKatyaSession()
@@ -407,9 +461,77 @@ export function Meetings({ onOpenSettings }: { onOpenSettings: () => void }) {
     await api.openTelemost(nextUrl);
   }
 
+  function upsertSavedTelemostLink(
+    rawUrl: string,
+    updates: Partial<Omit<SavedTelemostLink, 'url' | 'createdAt'>> = {}
+  ): SavedTelemostLink | null {
+    const nextUrl = normalizeTelemostUrl(rawUrl);
+    if (!isTelemostUrl(nextUrl)) {
+      return null;
+    }
+
+    const existing = savedTelemostLinks.find((link) => link.url === nextUrl);
+    const nextItem: SavedTelemostLink = {
+      url: nextUrl,
+      title: updates.title?.trim() || existing?.title || `Созвон ${formatListDate(new Date().toISOString())}`,
+      createdAt: existing?.createdAt ?? new Date().toISOString(),
+      katyaMeetingId: updates.katyaMeetingId ?? existing?.katyaMeetingId,
+      accessGroupId: updates.accessGroupId ?? existing?.accessGroupId
+    };
+    const nextLinks = [
+      nextItem,
+      ...savedTelemostLinks.filter((link) => link.url !== nextUrl)
+    ];
+    setSavedTelemostLinks(nextLinks);
+    writeSavedTelemostLinks(nextLinks);
+    return nextItem;
+  }
+
+  function saveCurrentTelemostLink() {
+    const nextUrl = normalizeTelemostUrl(address);
+    setAddress(nextUrl);
+    const savedLink = upsertSavedTelemostLink(nextUrl, {
+      accessGroupId: accessGroupId.trim() || undefined
+    });
+    if (!savedLink) {
+      setStatusText('Укажите ссылку telemost.yandex.ru.');
+      return;
+    }
+    setStatusText('Ссылка на встречу сохранена.');
+  }
+
+  function selectSavedTelemostLink(link: SavedTelemostLink) {
+    setAddress(link.url);
+    setKatyaMeetingId(link.katyaMeetingId ?? '');
+    if (link.katyaMeetingId) {
+      window.localStorage.setItem(katyaMeetingStorageKey, link.katyaMeetingId);
+    } else {
+      window.localStorage.removeItem(katyaMeetingStorageKey);
+    }
+    if (link.accessGroupId) {
+      setAccessGroupId(link.accessGroupId);
+      window.localStorage.setItem(katyaAccessGroupStorageKey, link.accessGroupId);
+    }
+    setStatusText('Ссылка выбрана.');
+  }
+
+  function removeSavedTelemostLink(link: SavedTelemostLink) {
+    setSavedTelemostLinks((currentLinks) => {
+      const nextLinks = currentLinks.filter((currentLink) => currentLink.url !== link.url);
+      writeSavedTelemostLinks(nextLinks);
+      return nextLinks;
+    });
+    if (link.katyaMeetingId && link.katyaMeetingId === katyaMeetingId) {
+      setKatyaMeetingId('');
+      window.localStorage.removeItem(katyaMeetingStorageKey);
+    }
+    setStatusText('Ссылка удалена из списка.');
+  }
+
   async function inviteKatya() {
     const nextUrl = normalizeTelemostUrl(address);
     const trimmedAccessGroupId = accessGroupId.trim();
+    const title = dailyTitle();
     setAddress(nextUrl);
 
     if (!isTelemostUrl(nextUrl)) {
@@ -433,11 +555,16 @@ export function Meetings({ onOpenSettings }: { onOpenSettings: () => void }) {
         baseUrl: katyaDefaultBaseUrl,
         sessionCookie: katyaSessionCookie,
         url: nextUrl,
-        title: dailyTitle(),
+        title,
         groupId: trimmedAccessGroupId
       });
       setKatyaMeetingId(meeting.id);
       window.localStorage.setItem(katyaMeetingStorageKey, meeting.id);
+      upsertSavedTelemostLink(nextUrl, {
+        title: meeting.title || title,
+        katyaMeetingId: meeting.id,
+        accessGroupId: trimmedAccessGroupId
+      });
       setStatusText('Катя приглашена на созвон.');
     } catch (error) {
       setStatusText(error instanceof Error ? error.message : 'Не удалось пригласить Катю.');
@@ -811,6 +938,9 @@ export function Meetings({ onOpenSettings }: { onOpenSettings: () => void }) {
             <button className="secondary-action" disabled={busy} onClick={openTelemost} type="button">
               Открыть Телемост
             </button>
+            <button className="secondary-action" disabled={busy} onClick={saveCurrentTelemostLink} type="button">
+              Сохранить встречу
+            </button>
             <button className="secondary-action" disabled={busy} onClick={onOpenSettings} type="button">
               Настроить Катю
             </button>
@@ -823,6 +953,42 @@ export function Meetings({ onOpenSettings }: { onOpenSettings: () => void }) {
           </div>
 
           <p className="inline-hint">{statusText}</p>
+
+          <div className="saved-meeting-links" aria-label="Сохраненные ссылки на встречи">
+            <div className="saved-meeting-links-head">
+              <h3>Сохраненные встречи</h3>
+              <span>{sortedSavedTelemostLinks.length}</span>
+            </div>
+            {sortedSavedTelemostLinks.length === 0 ? (
+              <p className="empty-state">Сохраненных ссылок пока нет.</p>
+            ) : (
+              <div className="saved-meeting-link-list">
+                {sortedSavedTelemostLinks.map((link) => (
+                  <article className={link.url === normalizeTelemostUrl(address) ? 'saved-meeting-link active' : 'saved-meeting-link'} key={link.url}>
+                    <button
+                      className="saved-meeting-link-main"
+                      onClick={() => selectSavedTelemostLink(link)}
+                      type="button"
+                    >
+                      <span>
+                        <strong>{link.title}</strong>
+                        <small>{link.url}</small>
+                      </span>
+                      <time>{formatListDate(link.createdAt)}</time>
+                    </button>
+                    <button
+                      aria-label={`Удалить встречу ${link.title}`}
+                      className="saved-meeting-link-remove"
+                      onClick={() => removeSavedTelemostLink(link)}
+                      type="button"
+                    >
+                      ×
+                    </button>
+                  </article>
+                ))}
+              </div>
+            )}
+          </div>
         </section>
       ) : mode === 'analyses' ? (
         <div className="meeting-recordings-view">

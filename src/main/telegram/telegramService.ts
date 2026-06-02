@@ -40,7 +40,9 @@ const TELEGRAM_RECENT_MESSAGE_SYNC_CHAT_LIMIT = 24;
 const TELEGRAM_BACKGROUND_SYNC_INTERVAL_MS = 30 * 1000;
 const TELEGRAM_BACKGROUND_SYNC_DEBOUNCE_MS = 1500;
 const missingTelegramCredentialsMessage =
-  'Telegram api_id/api_hash не сохранены. Откройте настройки Telegram и сохраните ключи заново.';
+  'Telegram api_id/api_hash не настроены. Заполните TELEGRAM_API_ID и TELEGRAM_API_HASH в .env.';
+const TELEGRAM_API_ID_ENV_KEY = 'TELEGRAM_API_ID';
+const TELEGRAM_API_HASH_ENV_KEY = 'TELEGRAM_API_HASH';
 
 function localTelegramFileUrl(filePath: string): string {
   return `teamspace-file://telegram/${Buffer.from(filePath, 'utf8').toString('base64url')}`;
@@ -165,15 +167,15 @@ export class TelegramService {
     private readonly events: TelegramServiceEvents = {}
   ) {}
 
-  async requestCode(payload: { apiId: string; apiHash: string; phone: string; proxyUrl?: string }): Promise<AppState> {
+  async requestCode(payload: { apiId?: string; apiHash?: string; phone: string; proxyUrl?: string }): Promise<AppState> {
     const savedCredentials = this.readCredentials();
-    const apiId = Number(payload.apiId || savedCredentials?.apiId);
-    const apiHash = payload.apiHash.trim() || savedCredentials?.apiHash || '';
+    const apiId = Number(process.env[TELEGRAM_API_ID_ENV_KEY]?.trim() || payload.apiId || savedCredentials?.apiId);
+    const apiHash = process.env[TELEGRAM_API_HASH_ENV_KEY]?.trim() || payload.apiHash?.trim() || savedCredentials?.apiHash || '';
     const phone = payload.phone.trim();
     const proxyUrl = payload.proxyUrl?.trim() || telegramDefaultProxyUrl;
 
     if (!Number.isInteger(apiId) || apiId <= 0 || !apiHash || !phone) {
-      throw new Error('Введите Telegram api_id, api_hash и номер телефона.');
+      throw new Error('Заполните TELEGRAM_API_ID, TELEGRAM_API_HASH в .env и введите номер телефона.');
     }
 
     try {

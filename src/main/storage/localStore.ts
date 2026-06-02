@@ -8,6 +8,12 @@ import { LocalTelegramDatabase } from './localTelegramDatabase';
 
 type StateChangeListener = (state: AppState) => void;
 
+function hasTelegramEnvCredentials(): boolean {
+  const apiId = Number(process.env.TELEGRAM_API_ID?.trim());
+  const apiHash = process.env.TELEGRAM_API_HASH?.trim();
+  return Number.isInteger(apiId) && apiId > 0 && Boolean(apiHash);
+}
+
 export class LocalStore {
   private statePath = '';
   private secretsPath = '';
@@ -36,7 +42,7 @@ export class LocalStore {
     this.state.telegram.topics = telegramCache.topics;
     this.state.telegram.messages = telegramCache.messages;
     this.state.redmine.hasApiKey = Boolean(this.getSecret('redmineApiKey'));
-    this.state.telegram.hasApiCredentials = Boolean(this.getSecret('telegramApiCredentials'));
+    this.state.telegram.hasApiCredentials = hasTelegramEnvCredentials() || Boolean(this.getSecret('telegramApiCredentials'));
     this.state.gitlab.hasToken = Boolean(this.getSecret('gitlabToken'));
     const hasTelegramSession = Boolean(this.getSecret('telegramSession'));
     let stateNeedsWrite = false;
@@ -47,7 +53,7 @@ export class LocalStore {
     }
     if (this.state.telegram.status === 'connected' && !this.state.telegram.hasApiCredentials) {
       this.state.telegram.status = 'error';
-      this.state.telegram.error = 'Telegram api_id/api_hash не сохранены. Откройте настройки Telegram и сохраните ключи заново.';
+      this.state.telegram.error = 'Telegram api_id/api_hash не настроены. Заполните TELEGRAM_API_ID и TELEGRAM_API_HASH в .env.';
       stateNeedsWrite = true;
     }
     if (this.state.gitlab.status === 'connected' && !this.state.gitlab.hasToken) {

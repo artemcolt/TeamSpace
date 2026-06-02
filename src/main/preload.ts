@@ -95,7 +95,7 @@ contextBridge.exposeInMainWorld('teamSpace', {
     goBackMailView: () => ipcRenderer.invoke('mail:go-back'),
     reloadMailView: () => ipcRenderer.invoke('mail:reload'),
     getMailCredentialsStatus: () => ipcRenderer.invoke('mail:get-credentials-status'),
-    saveMailCredentials: (payload: { username: string; password?: string }) =>
+    saveMailCredentials: (payload: { url?: string; username: string; password?: string }) =>
       ipcRenderer.invoke('mail:save-credentials', payload),
     deleteMailCredentials: () => ipcRenderer.invoke('mail:delete-credentials'),
     showBrowserView: (payload: { bounds: { x: number; y: number; width: number; height: number }; url?: string }) =>
@@ -143,7 +143,7 @@ contextBridge.exposeInMainWorld('teamSpace', {
     saveRecording: (payload: { fileName: string; data: ArrayBuffer }) =>
       ipcRenderer.invoke('recording:save', payload),
     openRecordingFolder: (directory: string) => ipcRenderer.invoke('recording:open-folder', directory),
-    requestTelegramCode: (payload: { apiId: string; apiHash: string; phone: string; proxyUrl?: string }) =>
+    requestTelegramCode: (payload: { phone: string; proxyUrl?: string }) =>
       ipcRenderer.invoke('telegram:request-code', payload),
     connectTelegram: (payload: { code: string; password?: string }) =>
       ipcRenderer.invoke('telegram:connect', payload),

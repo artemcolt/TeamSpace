@@ -1244,39 +1244,6 @@ select:disabled {
   background: #ffffff;
 }
 
-.telegram-setup-body.credentials {
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
-.telegram-apps-setup {
-  display: grid;
-  flex: 1 1 auto;
-  grid-template-columns: minmax(420px, 1fr) minmax(260px, 340px);
-  gap: 14px;
-  min-height: 0;
-  margin-top: 12px;
-}
-
-.telegram-apps-browser {
-  min-height: 0;
-  overflow: hidden;
-  border: 1px solid #dbe3ee;
-  border-radius: 0;
-  background: #ffffff;
-}
-
-.telegram-apps-browser .browser-layout {
-  height: 100%;
-  background: #ffffff;
-}
-
-.telegram-apps-fields {
-  min-width: 0;
-  overflow: auto;
-}
-
 .telegram-setup-body.connected {
   background: #ffffff;
 }
@@ -1837,6 +1804,55 @@ textarea {
   background: #ffffff;
 }
 
+.mail-view-host.hidden {
+  display: none;
+}
+
+.mail-fallback {
+  flex: 1;
+  min-height: 0;
+  padding: 28px 32px;
+  color: #20242c;
+  background: #ffffff;
+  overflow: auto;
+}
+
+.mail-fallback h2 {
+  margin-top: 4px;
+  font-size: 30px;
+  line-height: 1.15;
+}
+
+.mail-fallback-error {
+  margin-top: 18px;
+  border-left: 4px solid #c46060;
+  padding: 12px 14px;
+  color: #8f2020;
+  background: #fff7f7;
+}
+
+.mail-settings-grid {
+  max-width: 1120px;
+  margin-top: 18px;
+}
+
+.mail-settings-grid label {
+  display: grid;
+  gap: 6px;
+  color: #394557;
+  font-weight: 750;
+}
+
+.mail-settings-grid input {
+  min-height: 42px;
+  border: 1px solid #cfd7e3;
+  border-radius: 6px;
+  padding: 0 12px;
+  color: #20242c;
+  background: #ffffff;
+  font: inherit;
+}
+
 .meetings-layout {
   display: flex;
   overflow: hidden;
@@ -1874,6 +1890,94 @@ textarea {
   min-height: 42px;
   min-width: 170px;
   justify-content: center;
+}
+
+.saved-meeting-links {
+  display: grid;
+  gap: 8px;
+  border-top: 1px solid #dbe2ec;
+  padding-top: 12px;
+}
+
+.saved-meeting-links-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.saved-meeting-links-head h3 {
+  font-size: 18px;
+  line-height: 1.2;
+}
+
+.saved-meeting-links-head span {
+  color: #657386;
+  font-weight: 800;
+}
+
+.saved-meeting-link-list {
+  display: grid;
+  border: 1px solid #dbe2ec;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.saved-meeting-link {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  border-bottom: 1px solid #dbe2ec;
+  background: #ffffff;
+}
+
+.saved-meeting-link:last-child {
+  border-bottom: 0;
+}
+
+.saved-meeting-link.active {
+  background: #e9f8ef;
+}
+
+.saved-meeting-link-main {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  border: 0;
+  padding: 10px 12px;
+  color: #20242c;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.saved-meeting-link-main span {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.saved-meeting-link-main strong,
+.saved-meeting-link-main small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.saved-meeting-link-main small,
+.saved-meeting-link-main time {
+  color: #657386;
+}
+
+.saved-meeting-link-remove {
+  width: 42px;
+  border: 0;
+  border-left: 1px solid #dbe2ec;
+  color: #8f2020;
+  background: transparent;
+  font-size: 24px;
+  cursor: pointer;
 }
 
 .meeting-topbar-actions {
@@ -5535,7 +5639,6 @@ textarea {
 
   .nav-list,
   .stepper,
-  .telegram-apps-setup,
   .telegram-setup,
   .telegram-setup-steps,
   .form-grid,

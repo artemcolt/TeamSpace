@@ -51,7 +51,6 @@ const AI_QUEUE_HISTORY_LIMIT = 100;
 const AGENT_WORK_ROOT = path.join(os.homedir(), 'Desktop', 'team-space', 'agent-results');
 const AGENT_PROJECTS_ROOT = path.join(os.homedir(), 'Desktop', 'team-space', 'projects');
 const AGENT_SCREENSHOT_PREVIEW_MAX_BYTES = 5 * 1024 * 1024;
-
 type CodexRunResult = {
   sessionId: string | null;
 };
@@ -2125,8 +2124,6 @@ export function registerIpcHandlers(
   ipcMain.handle('recording:open-folder', (_event, directory: string) => shell.openPath(directory));
 
   ipcMain.handle('telegram:request-code', (_event, payload: {
-    apiId: string;
-    apiHash: string;
     phone: string;
     proxyUrl?: string;
   }) => telegram.requestCode(payload));

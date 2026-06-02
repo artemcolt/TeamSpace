@@ -4,14 +4,11 @@ import { api } from '../../domain/bridge';
 import { redmineHelpUrl, telegramDefaultProxyUrl } from '../../domain/constants';
 import { optionName } from '../../domain/formatters';
 import appIcon from '../../assets/app-icon.png';
-import { Browser } from '../browser/Browser';
 import { GitLabPanel } from '../settings/GitLabPanel';
 import { MailCredentialsPanel } from '../settings/MailCredentialsPanel';
 
 export type OnboardingStep = 'welcome' | 'telegram' | 'chats' | 'redmine' | 'gitlab' | 'defaults' | 'katya' | 'mail' | 'review';
-type TelegramSetupStage = 'prepare' | 'credentials' | 'phone' | 'code' | 'connected';
-
-const telegramAppsUrl = 'https://my.telegram.org/apps';
+type TelegramSetupStage = 'prepare' | 'phone' | 'code' | 'connected';
 
 export function Onboarding({
   busy,
@@ -286,8 +283,6 @@ export function TelegramConnectPanel({
   const [phone, setPhone] = useState('');
   const [code, setCode] = useState('');
   const [password, setPassword] = useState('');
-  const [apiId, setApiId] = useState('');
-  const [apiHash, setApiHash] = useState('');
   const [proxyUrl, setProxyUrl] = useState(telegramDefaultProxyUrl);
   const [authStatus, setAuthStatus] = useState('');
   const [codeRequested, setCodeRequested] = useState(state.telegram.codeRequested);
@@ -298,27 +293,19 @@ export function TelegramConnectPanel({
     if (state.telegram.codeRequested) {
       return 'code';
     }
-    if (state.telegram.hasApiCredentials) {
-      return 'phone';
-    }
     return 'prepare';
   });
 
   const telegramSetupSteps: Array<{ id: TelegramSetupStage; label: string }> = [
     { id: 'prepare', label: 'Подготовка' },
-    { id: 'credentials', label: 'Ключи' },
     { id: 'phone', label: 'Телефон' },
     { id: 'code', label: 'Код' },
     { id: 'connected', label: 'Готово' }
   ];
   const currentStepIndex = telegramSetupSteps.findIndex((item) => item.id === setupStage);
-  const hasCredentialsForRequest = state.telegram.hasApiCredentials || Boolean(apiId.trim() && apiHash.trim());
   const telegramStageDone = (stage: TelegramSetupStage) => {
     if (stage === 'prepare') {
       return setupStage !== 'prepare' || state.telegram.status === 'connected';
-    }
-    if (stage === 'credentials') {
-      return hasCredentialsForRequest || state.telegram.status === 'connected';
     }
     if (stage === 'phone') {
       return codeRequested || state.telegram.status === 'connected';
@@ -340,16 +327,13 @@ export function TelegramConnectPanel({
       return;
     }
     if (setupStage === 'connected') {
-      setSetupStage(state.telegram.hasApiCredentials ? 'phone' : 'prepare');
+      setSetupStage('prepare');
     }
   }, [setupStage, state.telegram.codeRequested, state.telegram.hasApiCredentials, state.telegram.status]);
 
   function canOpenTelegramStage(stage: TelegramSetupStage) {
-    if (stage === 'prepare' || stage === 'credentials') {
+    if (stage === 'prepare' || stage === 'phone') {
       return true;
-    }
-    if (stage === 'phone') {
-      return Boolean(hasCredentialsForRequest);
     }
     if (stage === 'code') {
       return codeRequested;
@@ -361,8 +345,6 @@ export function TelegramConnectPanel({
     setAuthStatus('Подключаюсь к Telegram и запрашиваю код...');
     runAction(
       () => api.requestTelegramCode({
-        apiId: apiId.trim(),
-        apiHash: apiHash.trim(),
         phone: phone.trim(),
         proxyUrl: proxyUrl.trim()
       })
@@ -398,8 +380,8 @@ export function TelegramConnectPanel({
       <p className="panel-label">Telegram configuration</p>
       <h3>Подключение Telegram</h3>
       <p className="helper">
-        Настройка идет по шагам: сначала получите ключи на Telegram Apps, затем введите телефон и код входа.
-        MTProxy используется только для Telegram user-client, не для загрузки сайта.
+        Настройка идет по шагам: ключи берутся из `.env`, здесь нужно указать proxy при необходимости,
+        затем ввести телефон и код входа.
       </p>
       <div className="telegram-setup-status">
         <span className={`telegram-status-dot ${state.telegram.status}`} aria-hidden="true" />
@@ -432,11 +414,8 @@ export function TelegramConnectPanel({
           {setupStage === 'prepare' && (
             <>
               <p className="inline-hint">
-                MTProxy нужен для подключения Telegram user-client после ввода ключей. Страница{' '}
-                <button className="inline-text-button" type="button" onClick={() => api.openExternal(telegramAppsUrl)}>
-                  my.telegram.org/apps
-                </button>{' '}
-                открывается как обычный HTTPS-сайт, поэтому для нее нужен системный VPN или HTTP/SOCKS proxy.
+                Telegram API keys берутся из `.env`: заполните `TELEGRAM_API_ID` и `TELEGRAM_API_HASH`.
+                MTProxy ниже используется только для подключения Telegram user-client.
               </p>
               <div className="form-grid">
                 <label className="wide">
@@ -449,54 +428,9 @@ export function TelegramConnectPanel({
                 </label>
               </div>
               <div className="actions">
-                <button className="primary-action" type="button" onClick={() => setSetupStage('credentials')}>
+                <button className="primary-action" type="button" onClick={() => setSetupStage('phone')}>
                   Далее
                 </button>
-                {state.telegram.hasApiCredentials && (
-                  <button className="secondary-action" type="button" onClick={() => setSetupStage('phone')}>
-                    Использовать сохраненные ключи
-                  </button>
-                )}
-              </div>
-            </>
-          )}
-
-          {setupStage === 'credentials' && (
-            <>
-              <p className="inline-hint">
-                Создайте приложение в Telegram Apps внутри Workspace, затем перенесите сюда `api_id` и `api_hash`.
-              </p>
-              <div className="telegram-apps-setup">
-                <div className="telegram-apps-browser">
-                  <Browser url={telegramAppsUrl} showToolbar />
-                </div>
-                <div className="telegram-apps-fields">
-                  <div className="form-grid">
-                    <label className="wide">
-                      <span>Telegram api_id</span>
-                      <input value={apiId} onChange={(event) => setApiId(event.target.value)} placeholder="123456" />
-                    </label>
-                    <label className="wide">
-                      <span>Telegram api_hash</span>
-                      <input
-                        type="password"
-                        value={apiHash}
-                        onChange={(event) => setApiHash(event.target.value)}
-                        placeholder={state.telegram.hasApiCredentials ? 'Сохранен в защищенном хранилище' : 'api_hash'}
-                      />
-                    </label>
-                  </div>
-                  <div className="actions">
-                    <button
-                      className="primary-action"
-                      disabled={!hasCredentialsForRequest}
-                      type="button"
-                      onClick={() => setSetupStage('phone')}
-                    >
-                      Далее
-                    </button>
-                  </div>
-                </div>
               </div>
             </>
           )}
@@ -514,12 +448,12 @@ export function TelegramConnectPanel({
                 </label>
               </div>
               <div className="actions">
-                <button className="secondary-action" type="button" onClick={() => setSetupStage('credentials')}>
-                  Назад к ключам
+                <button className="secondary-action" type="button" onClick={() => setSetupStage('prepare')}>
+                  Назад
                 </button>
                 <button
                   className="primary-action"
-                  disabled={busy || !phone.trim() || !hasCredentialsForRequest}
+                  disabled={busy || !phone.trim()}
                   type="button"
                   onClick={requestCode}
                 >
