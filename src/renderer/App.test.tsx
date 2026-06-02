@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from './App';
+import { katyaAccessGroupStorageKey } from './domain/constants';
 
 const baseState: AppState = {
   workspace: {
@@ -62,6 +63,22 @@ const baseState: AppState = {
 function connectedState(): AppState {
   return {
     ...baseState,
+    gitlab: {
+      ...baseState.gitlab,
+      status: 'connected',
+      hasToken: true,
+      projects: [{
+        id: '10',
+        name: 'Workspace',
+        pathWithNamespace: 'example/workspace',
+        webUrl: 'https://gitlab.example.com/example/workspace',
+        defaultBranch: 'main',
+        lastActivityAt: '2026-06-01T10:00:00.000Z',
+        sshUrlToRepo: 'git@gitlab.example.com:example/workspace.git',
+        httpUrlToRepo: 'https://gitlab.example.com/example/workspace.git'
+      }],
+      selectedProjectIds: ['10']
+    },
     telegram: {
       ...baseState.telegram,
       status: 'connected',
@@ -192,7 +209,7 @@ function installBridge(initialState: AppState) {
       error: ''
     })),
     openTelemost: vi.fn(async () => undefined),
-    getKatyaSession: vi.fn(async () => ''),
+    getKatyaSession: vi.fn(async () => 'test-session'),
     saveKatyaSession: vi.fn(async () => undefined),
     getKatyaMe: vi.fn(async () => ({
       email: 'user@example.com',
@@ -708,6 +725,7 @@ function installBridge(initialState: AppState) {
 describe('App', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    window.localStorage.clear();
   });
 
   afterEach(() => {
@@ -721,12 +739,12 @@ describe('App', () => {
 
     await screen.findByRole('button', { name: 'Telegram' });
     await user.click(screen.getByRole('button', { name: 'Telegram' }));
-    await user.click(screen.getByRole('button', { name: 'Ввести api_id и api_hash' }));
+    await user.click(screen.getByRole('button', { name: 'Далее' }));
     await user.type(screen.getByLabelText('Telegram api_id'), '123456');
     await user.type(screen.getByLabelText('Telegram api_hash'), 'hash');
-    await user.click(screen.getByRole('button', { name: 'Далее: телефон' }));
+    await user.click(screen.getByRole('button', { name: 'Далее' }));
     await user.type(screen.getByLabelText('Номер телефона'), '+10000000000');
-    await user.click(screen.getByRole('button', { name: 'Получить код' }));
+    await user.click(screen.getByRole('button', { name: 'Далее' }));
 
     expect(api.requestTelegramCode).toHaveBeenCalledWith({
       apiId: '123456',
@@ -737,7 +755,7 @@ describe('App', () => {
     expect(await screen.findByText(/Код запрошен через Telegram/)).toBeInTheDocument();
   });
 
-  it('connects GitLab and saves selected source projects', async () => {
+  it('connects GitLab and advances to defaults in setup', async () => {
     const api = installBridge(baseState);
     const user = userEvent.setup();
     render(<App />);
@@ -745,21 +763,79 @@ describe('App', () => {
     await user.click(await screen.findByRole('button', { name: 'GitLab' }));
     await screen.findByRole('heading', { name: 'Исходный код проектов' });
     await user.type(screen.getByLabelText('Personal Access Token'), 'gitlab-test-token');
-    await user.click(screen.getByRole('button', { name: 'Проверить и загрузить проекты' }));
-
-    const projectCheckbox = await screen.findByRole('checkbox', { name: /example\/workspace/ });
-    await user.click(projectCheckbox);
-    await user.click(screen.getByRole('button', { name: 'Сохранить выбор' }));
+    await user.click(screen.getByRole('button', { name: 'Проверить и подключить GitLab' }));
 
     expect(api.testGitLab).toHaveBeenCalledWith({
       baseUrl: 'https://gitlab.example.com/',
       token: 'gitlab-test-token'
     });
-    expect(api.saveGitLab).toHaveBeenCalledWith({
-      baseUrl: 'https://gitlab.example.com/',
-      token: 'gitlab-test-token',
-      selectedProjectIds: ['10']
+    expect(await screen.findByRole('heading', { name: 'Проект, tracker, priority, спринт и исполнитель по умолчанию' })).toBeInTheDocument();
+  });
+
+  it('saves defaults and advances to Katya in setup', async () => {
+    const api = installBridge(baseState);
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByRole('button', { name: 'Defaults' }));
+    await user.click(screen.getByRole('button', { name: 'Сохранить defaults' }));
+
+    await waitFor(() =>
+      expect(api.saveRedmine).toHaveBeenCalledWith({
+        baseUrl: 'https://redmine.example.com/',
+        defaultProjectId: '1',
+        defaultTrackerId: '2',
+        defaultPriorityId: '3',
+        defaultSprintId: '4',
+        defaultAssigneeId: '7'
+      })
+    );
+    expect(await screen.findByRole('heading', { name: 'Сервис записи Катя' })).toBeInTheDocument();
+  });
+
+  it('marks defaults as done when Redmine has no tracker and priority catalogs', async () => {
+    const state = {
+      ...baseState,
+      redmine: {
+        ...baseState.redmine,
+        trackers: [],
+        priorities: []
+      },
+      workspace: {
+        ...baseState.workspace,
+        defaultTrackerId: '',
+        defaultPriorityId: ''
+      }
+    };
+    const api = installBridge(state);
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByRole('button', { name: 'Defaults' }));
+    await user.click(screen.getByRole('button', { name: 'Сохранить defaults' }));
+
+    expect(await screen.findByRole('heading', { name: 'Сервис записи Катя' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Defaults/ })).toHaveClass('done');
+    expect(api.saveRedmine).toHaveBeenCalledWith({
+      baseUrl: 'https://redmine.example.com/',
+      defaultProjectId: '1',
+      defaultTrackerId: '',
+      defaultPriorityId: '',
+      defaultSprintId: '4',
+      defaultAssigneeId: '7'
     });
+  });
+
+  it('shows Start Work action on the final setup review', async () => {
+    const api = installBridge(connectedState());
+    api.getKatyaSession.mockResolvedValue('');
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByRole('button', { name: 'Проверка' }));
+
+    expect(screen.getByRole('button', { name: 'Начать работу' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Перейти к сообщениям' })).not.toBeInTheDocument();
   });
 
   it('creates a Redmine issue from a selected Telegram message', async () => {
@@ -1454,6 +1530,7 @@ describe('App', () => {
     state.telegram.messages[0].text = 'https://telemost.yandex.ru/j/00000000000001';
     const api = installBridge(state);
     vi.mocked(api.getKatyaSession).mockResolvedValue('callrec_session=fake-test-session');
+    window.localStorage.setItem(katyaAccessGroupStorageKey, 'group-access-1');
     const user = userEvent.setup();
     render(<App />);
 
@@ -1464,6 +1541,7 @@ describe('App', () => {
 
     await waitFor(() =>
       expect(api.createKatyaMeeting).toHaveBeenCalledWith(expect.objectContaining({
+        groupId: 'group-access-1',
         url: 'https://telemost.yandex.ru/j/00000000000001'
       }))
     );
@@ -1516,7 +1594,7 @@ describe('App', () => {
     await user.click(await screen.findByRole('button', { name: 'Мои задачи' }));
 
     await waitFor(() =>
-      expect(api.loadRedmineMyIssues).toHaveBeenCalledWith({ projectId: '1', sprintId: '4' })
+      expect(api.loadRedmineMyIssues).toHaveBeenCalledWith({ projectId: '1', sprintId: '4', assigneeId: '7' })
     );
     expect(await screen.findByRole('heading', { name: '#123 - Проверить обработку спринта' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Новые' })).toBeInTheDocument();
@@ -1674,7 +1752,8 @@ describe('App', () => {
       expect(api.deleteRedmineIssue).toHaveBeenCalledWith({
         issueId: '123',
         projectId: '1',
-        sprintId: '4'
+        sprintId: '4',
+        cacheAssigneeId: '7'
       })
     );
     expect(confirmMock).toHaveBeenCalledWith('Удалить задачу #123?');
@@ -1860,6 +1939,26 @@ describe('App', () => {
     expect(screen.getByText(/проверить одновременную запись/)).toBeInTheDocument();
   });
 
+  it('passes access group when inviting Katya from Meetings', async () => {
+    const api = installBridge(connectedState());
+    api.getKatyaSession.mockResolvedValue('test-session');
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByRole('button', { name: 'Встречи' }));
+    await user.type(screen.getByLabelText('Группа доступа'), 'group-access-2');
+    await user.click(screen.getByRole('button', { name: 'Пригласить Катю' }));
+
+    await waitFor(() =>
+      expect(api.createKatyaMeeting).toHaveBeenCalledWith(expect.objectContaining({
+        baseUrl: 'http://localhost:8077',
+        groupId: 'group-access-2',
+        sessionCookie: 'test-session',
+        url: 'https://telemost.yandex.ru/j/00000000000000'
+      }))
+    );
+  });
+
   it('passes a custom meeting analysis prompt from the setup dialog', async () => {
     const api = installBridge(connectedState());
     api.getKatyaSession.mockResolvedValue('test-session');
@@ -1915,13 +2014,14 @@ describe('App', () => {
 
     await user.click(await screen.findByRole('button', { name: 'Настройки' }));
     await user.click(screen.getByRole('button', { name: 'Катя' }));
-    await user.type(screen.getByPlaceholderText('callrec_session=...'), 'settings-session');
+    await user.type(screen.getByLabelText('callrec_session'), 'settings-session');
     await user.click(screen.getByRole('button', { name: 'Сохранить сессию' }));
 
     await waitFor(() =>
       expect(api.saveKatyaSession).toHaveBeenCalledWith({ sessionCookie: 'settings-session' })
     );
     expect(await screen.findByText('Сессия Кати сохранена.')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Группа доступа')).not.toBeInTheDocument();
   });
 
   it('separates Telegram forum topics inside a selected chat', async () => {
@@ -2093,7 +2193,7 @@ describe('App', () => {
 
     expect(await screen.findByText('#123 - Cached task')).toBeInTheDocument();
     expect(screen.getByText('Синхронизация...')).toBeInTheDocument();
-    expect(api.syncRedmineMyIssues).toHaveBeenCalledWith({ projectId: '1', sprintId: '4' });
+    expect(api.syncRedmineMyIssues).toHaveBeenCalledWith({ projectId: '1', sprintId: '4', assigneeId: '7' });
 
     resolveSync({
       issues: [
@@ -2264,13 +2364,13 @@ describe('App', () => {
 
     await user.click(await screen.findByRole('button', { name: 'Мои задачи' }));
     await waitFor(() =>
-      expect(api.loadRedmineMyIssues).toHaveBeenCalledWith({ projectId: '1', sprintId: '4' })
+      expect(api.loadRedmineMyIssues).toHaveBeenCalledWith({ projectId: '1', sprintId: '4', assigneeId: '7' })
     );
 
     await user.selectOptions(screen.getByLabelText('Спринт'), '6');
 
     await waitFor(() =>
-      expect(api.loadRedmineMyIssues).toHaveBeenCalledWith({ projectId: '1', sprintId: '6' })
+      expect(api.loadRedmineMyIssues).toHaveBeenCalledWith({ projectId: '1', sprintId: '6', assigneeId: '7' })
     );
   });
 
@@ -2298,7 +2398,8 @@ describe('App', () => {
         issueId: '123',
         sprintId: '6',
         projectId: '1',
-        previousSprintId: '4'
+        previousSprintId: '4',
+        cacheAssigneeId: '7'
       })
     );
     expect(screen.queryByRole('complementary', { name: 'Задача #123' })).not.toBeInTheDocument();
@@ -2351,7 +2452,8 @@ describe('App', () => {
         statusId: '3',
         status: 'Review',
         projectId: '1',
-        sprintId: '4'
+        sprintId: '4',
+        cacheAssigneeId: '7'
       })
     );
   });
@@ -2414,7 +2516,8 @@ describe('App', () => {
         statusId: '7',
         status: 'В работе',
         projectId: '1',
-        sprintId: '4'
+        sprintId: '4',
+        cacheAssigneeId: '7'
       })
     );
   });
@@ -2486,7 +2589,8 @@ describe('App', () => {
         statusId: '6',
         status: 'На проверке',
         projectId: '1',
-        sprintId: '4'
+        sprintId: '4',
+        cacheAssigneeId: '7'
       })
     );
     expect(await screen.findByText(/Redmine оставил задачу в статусе "New"/)).toBeInTheDocument();

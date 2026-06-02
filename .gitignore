@@ -15,6 +15,7 @@ release/
 secrets.json
 state.json
 user-data/
+.idea/
 *.pem
 *.key
 *.p12

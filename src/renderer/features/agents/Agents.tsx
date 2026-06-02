@@ -231,13 +231,14 @@ export function Agents({ state }: { state: AppState }) {
   useEffect(() => {
     const projectId = state.workspace.defaultProjectId;
     const sprintId = state.workspace.defaultSprintId;
+    const assigneeId = state.workspace.defaultAssigneeId;
     if (!projectId || !sprintId) {
       setIssueStatusOptions([]);
       return;
     }
 
     let cancelled = false;
-    api.loadRedmineMyIssues({ projectId, sprintId })
+    api.loadRedmineMyIssues({ projectId, sprintId, assigneeId })
       .then((response) => {
         if (!cancelled) {
           setIssueStatusOptions(statusOptionsFromIssues(response.issues));
@@ -248,7 +249,7 @@ export function Agents({ state }: { state: AppState }) {
     return () => {
       cancelled = true;
     };
-  }, [state.workspace.defaultProjectId, state.workspace.defaultSprintId]);
+  }, [state.workspace.defaultAssigneeId, state.workspace.defaultProjectId, state.workspace.defaultSprintId]);
 
   useEffect(() => {
     if (!selectedReportId && reports.length > 0) {

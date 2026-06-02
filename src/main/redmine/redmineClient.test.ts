@@ -154,7 +154,11 @@ describe('loadRedmineMyIssues', () => {
     vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
 
     await expect(
-      loadRedmineMyIssues('https://redmine.example/', 'test-api-key', { projectId: '9', sprintId: 'version:42' })
+      loadRedmineMyIssues('https://redmine.example/', 'test-api-key', {
+        projectId: '9',
+        sprintId: 'version:42',
+        assigneeId: '7'
+      })
     ).resolves.toEqual([
       {
         id: '21',
@@ -170,7 +174,7 @@ describe('loadRedmineMyIssues', () => {
       }
     ]);
     const requestedUrl = String(fetchMock.mock.calls[0][0]);
-    expect(requestedUrl).toContain('/issues.json?project_id=9&assigned_to_id=me&status_id=open');
+    expect(requestedUrl).toContain('/issues.json?project_id=9&assigned_to_id=7&status_id=open');
     expect(requestedUrl).toContain('fixed_version_id=42');
   });
 

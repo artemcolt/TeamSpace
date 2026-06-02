@@ -1,9 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../../domain/bridge';
+import { katyaAccessGroupStorageKey, katyaDefaultBaseUrl } from '../../domain/constants';
 
 const defaultTelemostUrl = 'https://telemost.yandex.ru/j/00000000000000';
-const katyaDefaultBaseUrl = 'http://localhost:8077';
-const defaultRecordingGroupId = '';
 const katyaMeetingStorageKey = 'team-space:katya-meeting-id';
 const katyaMeetingsPageSize = 20;
 
@@ -320,6 +319,9 @@ export function Meetings({ onOpenSettings }: { onOpenSettings: () => void }) {
   const [katyaMeetingId, setKatyaMeetingId] = useState(() =>
     window.localStorage.getItem(katyaMeetingStorageKey) ?? ''
   );
+  const [accessGroupId, setAccessGroupId] = useState(() =>
+    window.localStorage.getItem(katyaAccessGroupStorageKey) ?? ''
+  );
   const [busy, setBusy] = useState(false);
   const [statusText, setStatusText] = useState('Готово к дейлику.');
 
@@ -407,10 +409,15 @@ export function Meetings({ onOpenSettings }: { onOpenSettings: () => void }) {
 
   async function inviteKatya() {
     const nextUrl = normalizeTelemostUrl(address);
+    const trimmedAccessGroupId = accessGroupId.trim();
     setAddress(nextUrl);
 
     if (!isTelemostUrl(nextUrl)) {
       setStatusText('Укажите ссылку telemost.yandex.ru.');
+      return;
+    }
+    if (!trimmedAccessGroupId) {
+      setStatusText('Укажите группу доступа для Кати.');
       return;
     }
     if (!katyaSessionCookie.trim()) {
@@ -418,6 +425,7 @@ export function Meetings({ onOpenSettings }: { onOpenSettings: () => void }) {
       return;
     }
 
+    window.localStorage.setItem(katyaAccessGroupStorageKey, trimmedAccessGroupId);
     setBusy(true);
     setStatusText('Приглашаю Катю.');
     try {
@@ -426,7 +434,7 @@ export function Meetings({ onOpenSettings }: { onOpenSettings: () => void }) {
         sessionCookie: katyaSessionCookie,
         url: nextUrl,
         title: dailyTitle(),
-        groupId: defaultRecordingGroupId || undefined
+        groupId: trimmedAccessGroupId
       });
       setKatyaMeetingId(meeting.id);
       window.localStorage.setItem(katyaMeetingStorageKey, meeting.id);
@@ -783,6 +791,19 @@ export function Meetings({ onOpenSettings }: { onOpenSettings: () => void }) {
                 }
               }}
               placeholder={defaultTelemostUrl}
+            />
+          </label>
+
+          <label className="simple-meeting-address">
+            <span>Группа доступа</span>
+            <input
+              value={accessGroupId}
+              onChange={(event) => {
+                const nextAccessGroupId = event.target.value;
+                setAccessGroupId(nextAccessGroupId);
+                window.localStorage.setItem(katyaAccessGroupStorageKey, nextAccessGroupId.trim());
+              }}
+              placeholder="ID группы в Кате"
             />
           </label>
 

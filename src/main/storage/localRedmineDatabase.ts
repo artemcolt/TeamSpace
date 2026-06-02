@@ -4,6 +4,10 @@ import initSqlJs from 'sql.js';
 import { now } from '../domain/appState';
 import type { RedmineIssueSummary } from '../domain/types';
 
+function cacheAssigneeId(value?: string): string {
+  return value?.trim() || 'me';
+}
+
 export class LocalRedmineDatabase {
   private dbPath = '';
   private db: import('sql.js').Database | null = null;
@@ -20,10 +24,14 @@ export class LocalRedmineDatabase {
     this.flush();
   }
 
-  loadIssues(payload: { projectId: string; sprintId: string }): { issues: RedmineIssueSummary[]; syncedAt: string | null } {
+  loadIssues(payload: { projectId: string; sprintId: string; assigneeId?: string }): {
+    issues: RedmineIssueSummary[];
+    syncedAt: string | null;
+  } {
     if (!this.db || !payload.projectId || !payload.sprintId) {
       return { issues: [], syncedAt: null };
     }
+    const assigneeId = cacheAssigneeId(payload.assigneeId);
 
     const rows = this.rows<{
       id: string;
@@ -40,16 +48,16 @@ export class LocalRedmineDatabase {
     }>(
       `select id, subject, status_id, status, tracker, priority, assignee, due_date, updated_on, url, synced_at
        from redmine_issues
-       where project_id = ? and sprint_id = ?
+       where project_id = ? and sprint_id = ? and assignee_id = ?
        order by datetime(updated_on) desc, id desc`,
-      [payload.projectId, payload.sprintId]
+      [payload.projectId, payload.sprintId, assigneeId]
     );
 
     const syncRow = this.rows<{ synced_at: string }>(
       `select synced_at
        from redmine_issue_syncs
-       where project_id = ? and sprint_id = ?`,
-      [payload.projectId, payload.sprintId]
+       where project_id = ? and sprint_id = ? and assignee_id = ?`,
+      [payload.projectId, payload.sprintId, assigneeId]
     )[0];
 
     return {
@@ -69,33 +77,42 @@ export class LocalRedmineDatabase {
     };
   }
 
-  saveIssues(payload: { projectId: string; sprintId: string; issues: RedmineIssueSummary[]; syncedAt?: string }): string {
+  saveIssues(payload: {
+    projectId: string;
+    sprintId: string;
+    assigneeId?: string;
+    issues: RedmineIssueSummary[];
+    syncedAt?: string;
+  }): string {
     if (!this.db || !payload.projectId || !payload.sprintId) {
       return payload.syncedAt ?? now();
     }
 
+    const assigneeId = cacheAssigneeId(payload.assigneeId);
     const syncedAt = payload.syncedAt ?? now();
     this.db.run('begin');
     try {
-      this.db.run('delete from redmine_issues where project_id = ? and sprint_id = ?', [
+      this.db.run('delete from redmine_issues where project_id = ? and sprint_id = ? and assignee_id = ?', [
         payload.projectId,
-        payload.sprintId
+        payload.sprintId,
+        assigneeId
       ]);
       this.db.run(
-        `insert into redmine_issue_syncs (project_id, sprint_id, synced_at)
-         values (?, ?, ?)
-         on conflict(project_id, sprint_id) do update set synced_at = excluded.synced_at`,
-        [payload.projectId, payload.sprintId, syncedAt]
+        `insert into redmine_issue_syncs (project_id, sprint_id, assignee_id, synced_at)
+         values (?, ?, ?, ?)
+         on conflict(project_id, sprint_id, assignee_id) do update set synced_at = excluded.synced_at`,
+        [payload.projectId, payload.sprintId, assigneeId, syncedAt]
       );
       for (const issue of payload.issues) {
         this.db.run(
           `insert into redmine_issues
-             (id, project_id, sprint_id, subject, status_id, status, tracker, priority, assignee, due_date, updated_on, url, synced_at)
-           values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             (id, project_id, sprint_id, assignee_id, subject, status_id, status, tracker, priority, assignee, due_date, updated_on, url, synced_at)
+           values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             issue.id,
             payload.projectId,
             payload.sprintId,
+            assigneeId,
             issue.subject,
             issue.statusId,
             issue.status,
@@ -121,6 +138,7 @@ export class LocalRedmineDatabase {
   updateIssueStatus(payload: {
     projectId: string;
     sprintId: string;
+    assigneeId?: string;
     issueId: string;
     statusId: string;
     status: string;
@@ -129,12 +147,13 @@ export class LocalRedmineDatabase {
       return null;
     }
 
+    const assigneeId = cacheAssigneeId(payload.assigneeId);
     const previous = this.loadIssues(payload).issues.find((issue) => issue.id === payload.issueId) ?? null;
     this.db.run(
       `update redmine_issues
        set status_id = ?, status = ?
-       where project_id = ? and sprint_id = ? and id = ?`,
-      [payload.statusId, payload.status, payload.projectId, payload.sprintId, payload.issueId]
+       where project_id = ? and sprint_id = ? and assignee_id = ? and id = ?`,
+      [payload.statusId, payload.status, payload.projectId, payload.sprintId, assigneeId, payload.issueId]
     );
     this.scheduleFlush();
     return previous;
@@ -143,6 +162,7 @@ export class LocalRedmineDatabase {
   updateIssueAssignee(payload: {
     projectId: string;
     sprintId: string;
+    assigneeId?: string;
     issueId: string;
     assignee: string;
   }): RedmineIssueSummary | null {
@@ -150,12 +170,13 @@ export class LocalRedmineDatabase {
       return null;
     }
 
+    const assigneeId = cacheAssigneeId(payload.assigneeId);
     const previous = this.loadIssues(payload).issues.find((issue) => issue.id === payload.issueId) ?? null;
     this.db.run(
       `update redmine_issues
        set assignee = ?
-       where project_id = ? and sprint_id = ? and id = ?`,
-      [payload.assignee, payload.projectId, payload.sprintId, payload.issueId]
+       where project_id = ? and sprint_id = ? and assignee_id = ? and id = ?`,
+      [payload.assignee, payload.projectId, payload.sprintId, assigneeId, payload.issueId]
     );
     this.scheduleFlush();
     return previous;
@@ -164,17 +185,19 @@ export class LocalRedmineDatabase {
   deleteIssue(payload: {
     projectId: string;
     sprintId: string;
+    assigneeId?: string;
     issueId: string;
   }): RedmineIssueSummary | null {
     if (!this.db || !payload.projectId || !payload.sprintId || !payload.issueId) {
       return null;
     }
 
+    const assigneeId = cacheAssigneeId(payload.assigneeId);
     const previous = this.loadIssues(payload).issues.find((issue) => issue.id === payload.issueId) ?? null;
     this.db.run(
       `delete from redmine_issues
-       where project_id = ? and sprint_id = ? and id = ?`,
-      [payload.projectId, payload.sprintId, payload.issueId]
+       where project_id = ? and sprint_id = ? and assignee_id = ? and id = ?`,
+      [payload.projectId, payload.sprintId, assigneeId, payload.issueId]
     );
     this.scheduleFlush();
     return previous;
@@ -212,24 +235,86 @@ export class LocalRedmineDatabase {
         status text not null,
         tracker text not null,
         priority text not null,
+        assignee_id text not null,
         assignee text not null,
         due_date text not null,
         updated_on text not null,
         url text not null,
         synced_at text not null,
-        primary key (id, project_id, sprint_id)
+        primary key (id, project_id, sprint_id, assignee_id)
       );
     `);
     this.db.run(`
       create table if not exists redmine_issue_syncs (
         project_id text not null,
         sprint_id text not null,
+        assignee_id text not null,
         synced_at text not null,
-        primary key (project_id, sprint_id)
+        primary key (project_id, sprint_id, assignee_id)
       );
     `);
+    this.ensureAssigneeCacheColumns();
     this.db.run('create index if not exists idx_redmine_issues_project_sprint on redmine_issues(project_id, sprint_id)');
     this.db.run('create index if not exists idx_redmine_issues_status on redmine_issues(status_id)');
+  }
+
+  private ensureAssigneeCacheColumns(): void {
+    if (!this.db) {
+      return;
+    }
+
+    if (!this.tableColumns('redmine_issues').includes('assignee_id')) {
+      this.db.run('alter table redmine_issues rename to redmine_issues_old');
+      this.db.run(`
+        create table redmine_issues (
+          id text not null,
+          project_id text not null,
+          sprint_id text not null,
+          assignee_id text not null,
+          subject text not null,
+          status_id text not null,
+          status text not null,
+          tracker text not null,
+          priority text not null,
+          assignee text not null,
+          due_date text not null,
+          updated_on text not null,
+          url text not null,
+          synced_at text not null,
+          primary key (id, project_id, sprint_id, assignee_id)
+        );
+      `);
+      this.db.run(`
+        insert into redmine_issues
+          (id, project_id, sprint_id, assignee_id, subject, status_id, status, tracker, priority, assignee, due_date, updated_on, url, synced_at)
+        select id, project_id, sprint_id, 'me', subject, status_id, status, tracker, priority, assignee, due_date, updated_on, url, synced_at
+        from redmine_issues_old
+      `);
+      this.db.run('drop table redmine_issues_old');
+    }
+
+    if (!this.tableColumns('redmine_issue_syncs').includes('assignee_id')) {
+      this.db.run('alter table redmine_issue_syncs rename to redmine_issue_syncs_old');
+      this.db.run(`
+        create table redmine_issue_syncs (
+          project_id text not null,
+          sprint_id text not null,
+          assignee_id text not null,
+          synced_at text not null,
+          primary key (project_id, sprint_id, assignee_id)
+        );
+      `);
+      this.db.run(`
+        insert into redmine_issue_syncs (project_id, sprint_id, assignee_id, synced_at)
+        select project_id, sprint_id, 'me', synced_at
+        from redmine_issue_syncs_old
+      `);
+      this.db.run('drop table redmine_issue_syncs_old');
+    }
+  }
+
+  private tableColumns(tableName: string): string[] {
+    return this.rows<{ name: string }>(`pragma table_info(${tableName})`).map((row) => row.name);
   }
 
   private rows<T extends Record<string, unknown>>(sql: string, params: unknown[] = []): T[] {

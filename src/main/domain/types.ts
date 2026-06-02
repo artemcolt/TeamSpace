@@ -126,6 +126,12 @@ export interface RedmineIssueListResponse {
   error?: string;
 }
 
+export interface RedmineIssueListPayload {
+  projectId: string;
+  sprintId: string;
+  assigneeId?: string;
+}
+
 export interface RedmineIssueAiPayload {
   issue: RedmineIssueSummary;
   projectId: string;
@@ -305,12 +311,14 @@ export interface UpdateRedmineIssueAssigneePayload {
   assignee?: string;
   projectId?: string;
   sprintId?: string;
+  cacheAssigneeId?: string;
 }
 
 export interface DeleteRedmineIssuePayload {
   issueId: string;
   projectId?: string;
   sprintId?: string;
+  cacheAssigneeId?: string;
 }
 
 export interface UpdateRedmineIssueSprintPayload {
@@ -318,6 +326,7 @@ export interface UpdateRedmineIssueSprintPayload {
   sprintId: string;
   projectId?: string;
   previousSprintId?: string;
+  cacheAssigneeId?: string;
 }
 
 export interface CreateRedmineIssuePayload {

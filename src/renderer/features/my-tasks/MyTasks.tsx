@@ -937,6 +937,7 @@ export function MyTasks({
       : state.gitlab.projects
   );
   const projectId = state.workspace.defaultProjectId;
+  const defaultAssigneeId = state.workspace.defaultAssigneeId;
   const projectName = optionName(projects, projectId);
   const sprintName = optionName(sprints, selectedSprintId);
   const redmineReady = state.redmine.status === 'connected' && state.redmine.hasApiKey;
@@ -1096,7 +1097,7 @@ export function MyTasks({
 
     async function loadIssues() {
       try {
-        const response = await api.loadRedmineMyIssues({ projectId, sprintId: selectedSprintId });
+        const response = await api.loadRedmineMyIssues({ projectId, sprintId: selectedSprintId, assigneeId: defaultAssigneeId });
         if (requestId.current === nextRequestId) {
           setIssues(response.issues);
           setLastSyncedAt(response.syncedAt);
@@ -1109,7 +1110,7 @@ export function MyTasks({
 
         setSyncingIssues(true);
         try {
-          const syncedResponse = await api.syncRedmineMyIssues({ projectId, sprintId: selectedSprintId });
+          const syncedResponse = await api.syncRedmineMyIssues({ projectId, sprintId: selectedSprintId, assigneeId: defaultAssigneeId });
           if (requestId.current === nextRequestId) {
             setIssues((currentIssues) =>
               mergeSyncedIssuesPreservingOrder(currentIssues, syncedResponse.issues)
@@ -1137,7 +1138,7 @@ export function MyTasks({
     }
 
     void loadIssues();
-  }, [projectId, redmineReady, selectedSprintId, sprints.length]);
+  }, [defaultAssigneeId, projectId, redmineReady, selectedSprintId, sprints.length]);
 
   useEffect(() => {
     const issueIds = issueIdsKey.split('|').filter(Boolean);
@@ -1176,7 +1177,7 @@ export function MyTasks({
     setError('');
     setAiMessage('');
     try {
-      const response = await api.syncRedmineMyIssues({ projectId, sprintId: selectedSprintId });
+      const response = await api.syncRedmineMyIssues({ projectId, sprintId: selectedSprintId, assigneeId: defaultAssigneeId });
       setIssues((currentIssues) => mergeSyncedIssuesPreservingOrder(currentIssues, response.issues));
       setLastSyncedAt(response.syncedAt);
       setError(response.error ?? '');
@@ -1333,7 +1334,8 @@ export function MyTasks({
         statusId: nextStatus.id,
         status: nextStatus.name,
         projectId,
-        sprintId: selectedSprintId
+        sprintId: selectedSprintId,
+        cacheAssigneeId: defaultAssigneeId
       });
       const actualStatusId = namedId(issueDetail(details)?.status);
       const actualStatusName = detailNamedText(details, 'status');
@@ -1751,7 +1753,8 @@ export function MyTasks({
         assigneeId: editIssueAssigneeId,
         assignee,
         projectId,
-        sprintId: selectedSprintId
+        sprintId: selectedSprintId,
+        cacheAssigneeId: defaultAssigneeId
       });
       const updatedOn = detailText(details, 'updated_on') || new Date().toISOString();
       const nextAssignee = detailNamedText(details, 'assigned_to') || assignee;
@@ -1791,7 +1794,8 @@ export function MyTasks({
         issueId,
         sprintId: editIssueSprintId,
         projectId,
-        previousSprintId: selectedSprintId
+        previousSprintId: selectedSprintId,
+        cacheAssigneeId: defaultAssigneeId
       });
       if (editIssueSprintId !== selectedSprintId) {
         setIssues((currentIssues) => currentIssues.filter((issue) => issue.id !== issueId));
@@ -1954,7 +1958,8 @@ export function MyTasks({
       await api.deleteRedmineIssue({
         issueId,
         projectId,
-        sprintId: selectedSprintId
+        sprintId: selectedSprintId,
+        cacheAssigneeId: defaultAssigneeId
       });
       setIssues((currentIssues) => currentIssues.filter((issue) => issue.id !== issueId));
       closeIssue();

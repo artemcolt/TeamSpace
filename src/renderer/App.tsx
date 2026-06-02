@@ -10,6 +10,7 @@ import { Meetings } from './features/meetings/Meetings';
 import { MyTasks } from './features/my-tasks/MyTasks';
 import { Onboarding, type OnboardingStep } from './features/onboarding/Onboarding';
 import { initials, optionName } from './domain/formatters';
+import appIcon from './assets/app-icon.png';
 
 const CHATGPT_URL = 'https://chatgpt.com/';
 
@@ -34,6 +35,8 @@ export function App() {
   const [state, setState] = useState<AppState | null>(null);
   const [view, setView] = useState<View>('settings');
   const [step, setStep] = useState<OnboardingStep>('welcome');
+  const [firstRunSetup, setFirstRunSetup] = useState(false);
+  const [hasKatyaSession, setHasKatyaSession] = useState(false);
   const [selectedChatId, setSelectedChatId] = useState<string>('');
   const [selectedTopicId, setSelectedTopicId] = useState<string>('');
   const [selectedMessageIds, setSelectedMessageIds] = useState<string[]>([]);
@@ -46,12 +49,17 @@ export function App() {
   const activeChatLoadSignals = useRef(new Map<string, string>());
 
   useEffect(() => {
-    api.getState().then((nextState) => {
+    Promise.all([api.getState(), api.getKatyaSession()]).then(([nextState, savedKatyaSession]) => {
+      const nextHasKatyaSession = Boolean(savedKatyaSession.trim());
       setState(nextState);
+      setHasKatyaSession(nextHasKatyaSession);
+      setFirstRunSetup(!isRequiredWorkspaceReady(nextState, nextHasKatyaSession));
       const firstSelectedChat = nextState.telegram.chats.find((chat) => chat.selected);
       setSelectedChatId(firstSelectedChat?.id ?? nextState.telegram.chats[0]?.id ?? '');
-      if (nextState.telegram.status === 'connected' && nextState.redmine.status === 'connected') {
+      if (isRequiredWorkspaceReady(nextState, nextHasKatyaSession)) {
         setView('inbox');
+      } else {
+        setView('settings');
       }
       if (nextState.telegram.status === 'connected' && nextState.telegram.hasApiCredentials) {
         api.syncTelegram().then(setState).catch(() => undefined);
@@ -169,7 +177,8 @@ export function App() {
     return telegramMessageIndex.byChat.get(selectedChatId) ?? [];
   }, [selectedChatId, selectedTopicId, telegramMessageIndex]);
 
-  const readyForMainFlow = state?.telegram.status === 'connected' && state.redmine.status === 'connected';
+  const katyaConfigured = hasKatyaSession;
+  const readyForMainFlow = Boolean(state && isRequiredWorkspaceReady(state, katyaConfigured));
   const unreadMessagesCount = state?.telegram.chats
     .filter((chat) => chat.selected && chat.notificationsEnabled !== false)
     .reduce((total, chat) => total + Math.max(0, chat.unreadCount ?? 0), 0) ?? 0;
@@ -300,15 +309,6 @@ export function App() {
     });
   }
 
-  function openFirstAvailableChat(nextState: AppState) {
-    const firstChat = nextState.telegram.chats.find((chat) => chat.selected) ?? nextState.telegram.chats[0];
-    if (firstChat) {
-      setSelectedChatId(firstChat.id);
-    }
-    setSelectedMessageIds([]);
-    setView('inbox');
-  }
-
   function openInternalBrowser(url: string) {
     setBrowserUrl(url);
     setView('browser');
@@ -397,9 +397,58 @@ export function App() {
   const selectedAiQueueItem = visibleAiQueue.find((item) => item.id === selectedAiQueueItemId)
     ?? visibleAiQueue[0]
     ?? null;
+  const setupShellVisible = !readyForMainFlow || firstRunSetup;
 
   if (!state) {
     return <div className="loading">Загрузка Workspace...</div>;
+  }
+
+  if (setupShellVisible) {
+    return (
+      <main className="setup-shell">
+        <div className="toast-stack" aria-live="polite" aria-atomic="false">
+          {toasts.map((toast) => (
+            <div key={toast.id} className={`toast ${toast.kind} ${toast.avatarLabel ? 'with-avatar' : ''}`}>
+              {toast.avatarLabel && (
+                <span className="toast-avatar" aria-hidden="true">
+                  {toast.avatar ? <img src={toast.avatar} alt="" /> : initials(toast.avatarLabel)}
+                </span>
+              )}
+              <span>{toast.message}</span>
+              <button
+                aria-label="Закрыть уведомление"
+                onClick={() => dismissToast(toast.id)}
+                type="button"
+              >
+                x
+              </button>
+            </div>
+          ))}
+        </div>
+
+        <Onboarding
+          busy={busy}
+          state={state}
+          step={step}
+          setStep={setStep}
+          onState={setState}
+          runAction={runAction}
+          firstRun
+          readyForMainFlow={readyForMainFlow}
+          katyaConfigured={katyaConfigured}
+          onKatyaConfigChange={setHasKatyaSession}
+          onFinish={() => {
+            if (readyForMainFlow) {
+              setFirstRunSetup(false);
+              setView('inbox');
+            } else {
+              setFirstRunSetup(true);
+              setStep('review');
+            }
+          }}
+        />
+      </main>
+    );
   }
 
   return (
@@ -426,7 +475,7 @@ export function App() {
 
       <aside className="sidebar">
         <div className="brand">
-          <div className="brand-mark">TS</div>
+          <img className="brand-mark" src={appIcon} alt="" />
           <div>
             <h1>Workspace</h1>
             <p>Team Space</p>
@@ -469,13 +518,13 @@ export function App() {
             Мои задачи
           </button>
           <button
-            className={view === 'agents' ? 'nav-item nav-item-secondary active' : 'nav-item nav-item-secondary'}
+            className={view === 'agents' ? 'nav-item nav-item-primary active' : 'nav-item nav-item-primary'}
             onClick={() => setView('agents')}
           >
             Агенты
           </button>
           <button
-            className={view === 'queue' ? 'nav-item nav-item-primary active' : 'nav-item nav-item-primary'}
+            className={view === 'queue' ? 'nav-item nav-item-secondary active' : 'nav-item nav-item-secondary'}
             onClick={() => setView('queue')}
           >
             <span>Очередь</span>
@@ -553,8 +602,17 @@ export function App() {
             setStep={setStep}
             onState={setState}
             runAction={runAction}
-            onFinish={() => setView(readyForMainFlow ? 'inbox' : 'settings')}
-            onOpenMessages={openFirstAvailableChat}
+            firstRun={false}
+            readyForMainFlow={readyForMainFlow}
+            katyaConfigured={katyaConfigured}
+            onKatyaConfigChange={setHasKatyaSession}
+            onFinish={() => {
+              if (readyForMainFlow) {
+                setView('inbox');
+              } else {
+                setStep('review');
+              }
+            }}
           />
         )}
 
@@ -727,5 +785,22 @@ export function App() {
         </section>
       )}
     </main>
+  );
+}
+
+function isRequiredWorkspaceReady(state: AppState, katyaConfigured: boolean) {
+  const trackerReady = state.redmine.trackers.length === 0 || Boolean(state.workspace.defaultTrackerId);
+  const priorityReady = state.redmine.priorities.length === 0 || Boolean(state.workspace.defaultPriorityId);
+  return (
+    state.telegram.status === 'connected' &&
+    state.telegram.chats.some((chat) => chat.selected) &&
+    state.redmine.status === 'connected' &&
+    state.gitlab.status === 'connected' &&
+    Boolean(state.workspace.defaultProjectId) &&
+    trackerReady &&
+    priorityReady &&
+    Boolean(state.workspace.defaultSprintId) &&
+    Boolean(state.workspace.defaultAssigneeId) &&
+    katyaConfigured
   );
 }

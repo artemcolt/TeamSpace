@@ -137,8 +137,8 @@ interface TeamSpaceBridge {
     }) => Promise<AppState>;
     loadRedmineProjectUsers: (payload: { projectId: string }) => Promise<AppState>;
     selectRedmineProject: (payload: { projectId: string }) => Promise<AppState>;
-    loadRedmineMyIssues: (payload: { projectId: string; sprintId: string }) => Promise<RedmineIssueListResponse>;
-    syncRedmineMyIssues: (payload: { projectId: string; sprintId: string }) => Promise<RedmineIssueListResponse>;
+    loadRedmineMyIssues: (payload: { projectId: string; sprintId: string; assigneeId?: string }) => Promise<RedmineIssueListResponse>;
+    syncRedmineMyIssues: (payload: { projectId: string; sprintId: string; assigneeId?: string }) => Promise<RedmineIssueListResponse>;
     loadRedmineIssueDetails: (payload: { issueId: string }) => Promise<RedmineIssueDetails>;
     updateRedmineIssueDetails: (payload: {
       issueId: string;
@@ -151,17 +151,20 @@ interface TeamSpaceBridge {
       assignee?: string;
       projectId?: string;
       sprintId?: string;
+      cacheAssigneeId?: string;
     }) => Promise<RedmineIssueDetails>;
     deleteRedmineIssue: (payload: {
       issueId: string;
       projectId?: string;
       sprintId?: string;
+      cacheAssigneeId?: string;
     }) => Promise<void>;
     updateRedmineIssueSprint: (payload: {
       issueId: string;
       sprintId: string;
       projectId?: string;
       previousSprintId?: string;
+      cacheAssigneeId?: string;
     }) => Promise<RedmineIssueDetails>;
     addRedmineIssueComment: (payload: { issueId: string; notes: string }) => Promise<RedmineIssueDetails>;
     updateRedmineIssueJournal: (payload: {
@@ -176,6 +179,7 @@ interface TeamSpaceBridge {
       status?: string;
       projectId?: string;
       sprintId?: string;
+      cacheAssigneeId?: string;
     }) => Promise<RedmineIssueDetails>;
     formatRedmineIssueWithAi: (payload: RedmineIssueAiPayload) => Promise<RedmineIssueAiResult>;
     generateRedmineSprintResultsWithAi: (payload: RedmineSprintResultsPayload) => Promise<RedmineSprintResultsAiResult>;

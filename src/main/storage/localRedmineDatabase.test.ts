@@ -139,6 +139,59 @@ describe('LocalRedmineDatabase', () => {
     );
   });
 
+  it('keeps Redmine issue caches separate by assignee', async () => {
+    const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'team-space-redmine-cache-'));
+    tempDirs.push(dataDir);
+    const db = new LocalRedmineDatabase();
+    await db.initialize(dataDir);
+
+    db.saveIssues({
+      projectId: '9',
+      sprintId: 'version:42',
+      assigneeId: '7',
+      issues: [
+        {
+          id: '21',
+          subject: 'Artem task',
+          tracker: 'Task',
+          statusId: '1',
+          status: 'New',
+          priority: 'Normal',
+          assignee: 'Артем',
+          dueDate: '',
+          updatedOn: '2026-05-28T08:30:00.000Z',
+          url: 'https://redmine.example/issues/21'
+        }
+      ]
+    });
+    db.saveIssues({
+      projectId: '9',
+      sprintId: 'version:42',
+      assigneeId: '9',
+      issues: [
+        {
+          id: '22',
+          subject: 'Other task',
+          tracker: 'Task',
+          statusId: '1',
+          status: 'New',
+          priority: 'Normal',
+          assignee: 'Иван',
+          dueDate: '',
+          updatedOn: '2026-05-28T08:30:00.000Z',
+          url: 'https://redmine.example/issues/22'
+        }
+      ]
+    });
+
+    expect(db.loadIssues({ projectId: '9', sprintId: 'version:42', assigneeId: '7' }).issues).toMatchObject([
+      { id: '21', assignee: 'Артем' }
+    ]);
+    expect(db.loadIssues({ projectId: '9', sprintId: 'version:42', assigneeId: '9' }).issues).toMatchObject([
+      { id: '22', assignee: 'Иван' }
+    ]);
+  });
+
   it('keeps sync metadata when the latest Redmine sync returns no issues', async () => {
     const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'team-space-redmine-cache-'));
     tempDirs.push(dataDir);

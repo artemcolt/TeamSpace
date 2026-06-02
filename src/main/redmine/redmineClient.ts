@@ -387,14 +387,19 @@ interface RedmineIssueResponseItem {
 export async function loadRedmineMyIssues(
   baseUrl: string,
   apiKey: string,
-  payload: { projectId: string; sprintId: string }
+  payload: { projectId: string; sprintId: string; assigneeId?: string }
 ): Promise<RedmineIssueSummary[]> {
   const sprint = parseSprintOptionId(payload.sprintId);
   if (!payload.projectId || !sprint) {
     return [];
   }
 
-  const projectFilter = `project_id=${encodeURIComponent(payload.projectId)}&assigned_to_id=me&status_id=open`;
+  const assigneeFilter = payload.assigneeId?.trim() || 'me';
+  const projectFilter = [
+    `project_id=${encodeURIComponent(payload.projectId)}`,
+    `assigned_to_id=${encodeURIComponent(assigneeFilter)}`,
+    'status_id=open'
+  ].join('&');
   let issues: RedmineIssueResponseItem[];
   if (sprint.type === 'version') {
     issues = await fetchRedminePages<RedmineIssueResponseItem>(

@@ -26,9 +26,42 @@ const GOOGLE_AUTH_HOSTS = new Set([
 ]);
 const APP_NAME = 'Workspace';
 const USER_DATA_DIRECTORY_NAME = 'team-space-desktop';
+const BROWSER_PROXY_ENV_KEY = 'TEAM_SPACE_BROWSER_PROXY_URL';
+const BROWSER_PROXY_USERNAME_ENV_KEY = 'TEAM_SPACE_BROWSER_PROXY_USERNAME';
+const BROWSER_PROXY_PASSWORD_ENV_KEY = 'TEAM_SPACE_BROWSER_PROXY_PASSWORD';
 
 app.setName(APP_NAME);
 app.setPath('userData', path.join(app.getPath('appData'), USER_DATA_DIRECTORY_NAME));
+loadLocalEnv();
+
+function loadLocalEnv(): void {
+  const envPath = path.join(process.cwd(), '.env');
+  if (!fs.existsSync(envPath)) {
+    return;
+  }
+
+  const content = fs.readFileSync(envPath, 'utf8');
+  for (const line of content.split(/\r?\n/)) {
+    const trimmedLine = line.trim();
+    if (!trimmedLine || trimmedLine.startsWith('#')) {
+      continue;
+    }
+    const separatorIndex = trimmedLine.indexOf('=');
+    if (separatorIndex <= 0) {
+      continue;
+    }
+
+    const key = trimmedLine.slice(0, separatorIndex).trim();
+    let value = trimmedLine.slice(separatorIndex + 1).trim();
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1);
+    }
+    process.env[key] ??= value;
+  }
+}
 
 function appIconPath(): string {
   const fileName = process.platform === 'win32' ? 'icon.ico' : 'icon.png';
@@ -401,6 +434,7 @@ function createBrowserView(): BrowserView {
       sandbox: true
     }
   });
+  configureBrowserProxy(view.webContents.session);
 
   view.webContents.setWindowOpenHandler(({ url }) => {
     if (isBrowserUrl(url)) {
@@ -428,8 +462,32 @@ function createBrowserView(): BrowserView {
     browserError = errorDescription || 'Не удалось загрузить страницу.';
     sendBrowserState();
   });
+  view.webContents.on('login', (event, _details, authInfo, callback) => {
+    const username = process.env[BROWSER_PROXY_USERNAME_ENV_KEY]?.trim();
+    const password = process.env[BROWSER_PROXY_PASSWORD_ENV_KEY]?.trim();
+    if (!authInfo.isProxy || !username || !password) {
+      return;
+    }
+
+    event.preventDefault();
+    callback(username, password);
+  });
 
   return view;
+}
+
+function configureBrowserProxy(browserSession: Electron.Session): void {
+  const proxyRules = process.env[BROWSER_PROXY_ENV_KEY]?.trim();
+  if (!proxyRules) {
+    return;
+  }
+
+  void browserSession.setProxy({
+    proxyRules,
+    proxyBypassRules: '<local>'
+  }).then(() => browserSession.closeAllConnections()).catch((error: unknown) => {
+    browserError = error instanceof Error ? error.message : 'Не удалось применить proxy для встроенного браузера.';
+  });
 }
 
 function warmUpBrowserView(): void {

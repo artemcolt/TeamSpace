@@ -9,6 +9,7 @@ import type {
   AppState,
   CreateRedmineIssuePayload,
   DeleteRedmineIssuePayload,
+  RedmineIssueListPayload,
   RedmineIssueListResponse,
   RedmineIssueSummary,
   UpdateRedmineIssueAssigneePayload,
@@ -228,7 +229,7 @@ export class RedmineService {
     });
   }
 
-  async loadMyIssues(payload: { projectId: string; sprintId: string }): Promise<RedmineIssueListResponse> {
+  async loadMyIssues(payload: RedmineIssueListPayload): Promise<RedmineIssueListResponse> {
     this.ensureMyIssuesPayload(payload);
     if (!payload.sprintId) {
       return { issues: [], source: 'redmine', syncedAt: null };
@@ -242,7 +243,7 @@ export class RedmineService {
     return this.syncMyIssues(payload);
   }
 
-  async syncMyIssues(payload: { projectId: string; sprintId: string }): Promise<RedmineIssueListResponse> {
+  async syncMyIssues(payload: RedmineIssueListPayload): Promise<RedmineIssueListResponse> {
     this.ensureMyIssuesPayload(payload);
     if (!payload.sprintId) {
       return { issues: [], source: 'redmine', syncedAt: null };
@@ -305,6 +306,7 @@ export class RedmineService {
       this.store.saveRedmineIssues({
         projectId: payload.projectId,
         sprintId: payload.sprintId,
+        assigneeId: payload.assigneeId,
         issues: [summary, ...cached.issues.filter((cachedIssue) => cachedIssue.id !== summary.id)],
         syncedAt: cached.syncedAt ?? createdAt
       });
@@ -366,6 +368,7 @@ export class RedmineService {
       ? this.store.updateCachedRedmineIssueAssignee({
           projectId: payload.projectId,
           sprintId: payload.sprintId,
+          assigneeId: payload.cacheAssigneeId,
           issueId: payload.issueId,
           assignee: assigneeName
         })
@@ -378,6 +381,7 @@ export class RedmineService {
         this.store.updateCachedRedmineIssueAssignee({
           projectId: payload.projectId,
           sprintId: payload.sprintId,
+          assigneeId: payload.cacheAssigneeId,
           issueId: payload.issueId,
           assignee: previous.assignee
         });
@@ -410,6 +414,7 @@ export class RedmineService {
         projectId: payload.projectId,
         previousSprintId: payload.previousSprintId,
         sprintId: payload.sprintId,
+        assigneeId: payload.cacheAssigneeId,
         issue
       });
     }
@@ -432,6 +437,7 @@ export class RedmineService {
       this.store.deleteCachedRedmineIssue({
         projectId: payload.projectId,
         sprintId: payload.sprintId,
+        assigneeId: payload.cacheAssigneeId,
         issueId: payload.issueId
       });
     }
@@ -497,6 +503,7 @@ export class RedmineService {
     status?: string;
     projectId?: string;
     sprintId?: string;
+    cacheAssigneeId?: string;
   }): Promise<Record<string, unknown>> {
     const state = this.store.getState();
     const apiKey = this.store.getSecret('redmineApiKey');
@@ -514,6 +521,7 @@ export class RedmineService {
       ? this.store.updateCachedRedmineIssueStatus({
           projectId: payload.projectId,
           sprintId: payload.sprintId,
+          assigneeId: payload.cacheAssigneeId,
           issueId: payload.issueId,
           statusId: payload.statusId,
           status: statusName
@@ -527,6 +535,7 @@ export class RedmineService {
         this.store.updateCachedRedmineIssueStatus({
           projectId: payload.projectId,
           sprintId: payload.sprintId,
+          assigneeId: payload.cacheAssigneeId,
           issueId: payload.issueId,
           statusId: previous.statusId,
           status: previous.status
@@ -551,6 +560,7 @@ export class RedmineService {
       this.store.updateCachedRedmineIssueStatus({
         projectId: payload.projectId,
         sprintId: payload.sprintId,
+        assigneeId: payload.cacheAssigneeId,
         issueId: payload.issueId,
         statusId: issue.statusId || payload.statusId,
         status: issue.status || statusName

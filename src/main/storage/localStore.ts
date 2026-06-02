@@ -108,7 +108,7 @@ export class LocalStore {
     this.telegramDb.saveAvatar(key, dataUrl);
   }
 
-  loadCachedRedmineIssues(payload: { projectId: string; sprintId: string }): {
+  loadCachedRedmineIssues(payload: { projectId: string; sprintId: string; assigneeId?: string }): {
     issues: RedmineIssueSummary[];
     syncedAt: string | null;
   } {
@@ -118,6 +118,7 @@ export class LocalStore {
   saveRedmineIssues(payload: {
     projectId: string;
     sprintId: string;
+    assigneeId?: string;
     issues: RedmineIssueSummary[];
     syncedAt?: string;
   }): string {
@@ -127,6 +128,7 @@ export class LocalStore {
   updateCachedRedmineIssueStatus(payload: {
     projectId: string;
     sprintId: string;
+    assigneeId?: string;
     issueId: string;
     statusId: string;
     status: string;
@@ -137,6 +139,7 @@ export class LocalStore {
   updateCachedRedmineIssueAssignee(payload: {
     projectId: string;
     sprintId: string;
+    assigneeId?: string;
     issueId: string;
     assignee: string;
   }): RedmineIssueSummary | null {
@@ -146,6 +149,7 @@ export class LocalStore {
   deleteCachedRedmineIssue(payload: {
     projectId: string;
     sprintId: string;
+    assigneeId?: string;
     issueId: string;
   }): RedmineIssueSummary | null {
     return this.redmineDb.deleteIssue(payload);
@@ -155,26 +159,31 @@ export class LocalStore {
     projectId: string;
     previousSprintId: string;
     sprintId: string;
+    assigneeId?: string;
     issue: RedmineIssueSummary;
   }): void {
     const previousCache = this.redmineDb.loadIssues({
       projectId: payload.projectId,
-      sprintId: payload.previousSprintId
+      sprintId: payload.previousSprintId,
+      assigneeId: payload.assigneeId
     });
     const nextCache = this.redmineDb.loadIssues({
       projectId: payload.projectId,
-      sprintId: payload.sprintId
+      sprintId: payload.sprintId,
+      assigneeId: payload.assigneeId
     });
 
     this.redmineDb.saveIssues({
       projectId: payload.projectId,
       sprintId: payload.previousSprintId,
+      assigneeId: payload.assigneeId,
       issues: previousCache.issues.filter((issue) => issue.id !== payload.issue.id),
       syncedAt: previousCache.syncedAt ?? undefined
     });
     this.redmineDb.saveIssues({
       projectId: payload.projectId,
       sprintId: payload.sprintId,
+      assigneeId: payload.assigneeId,
       issues: [payload.issue, ...nextCache.issues.filter((issue) => issue.id !== payload.issue.id)],
       syncedAt: nextCache.syncedAt ?? previousCache.syncedAt ?? undefined
     });

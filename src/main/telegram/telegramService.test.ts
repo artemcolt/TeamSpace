@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { defaultState } from '../domain/appState';
 import type { AppState } from '../domain/types';
 import type { LocalStore } from '../storage/localStore';
-import { TelegramService } from './telegramService';
+import { parseTelegramProxy, TelegramService } from './telegramService';
 
 vi.mock('electron', () => ({
   app: {
@@ -46,5 +46,42 @@ describe('TelegramService stored credentials', () => {
       hasApiCredentials: false,
       error: 'Telegram api_id/api_hash не сохранены. Откройте настройки Telegram и сохраните ключи заново.'
     });
+  });
+});
+
+describe('parseTelegramProxy', () => {
+  it('supports Telegram MTProxy deep links', () => {
+    expect(parseTelegramProxy('https://t.me/proxy?server=203.0.113.10&port=9443&secret=secret-value')).toEqual({
+      ip: '203.0.113.10',
+      port: 9443,
+      secret: 'secret-value',
+      MTProxy: true,
+      timeout: 10
+    });
+  });
+
+  it('supports mtproxy URLs', () => {
+    expect(parseTelegramProxy('mtproxy://203.0.113.10:9443?secret=secret-value')).toEqual({
+      ip: '203.0.113.10',
+      port: 9443,
+      secret: 'secret-value',
+      MTProxy: true,
+      timeout: 10
+    });
+  });
+
+  it('supports socks URLs with credentials', () => {
+    expect(parseTelegramProxy('socks5://user:password@127.0.0.1:1080')).toEqual({
+      ip: '127.0.0.1',
+      port: 1080,
+      socksType: 5,
+      username: 'user',
+      password: 'password',
+      timeout: 10
+    });
+  });
+
+  it('rejects MTProxy URLs without secret', () => {
+    expect(() => parseTelegramProxy('mtproxy://203.0.113.10:9443')).toThrow('MTProxy требует secret.');
   });
 });

@@ -137,6 +137,9 @@ export function Browser({ url, showToolbar = true, viewKind = 'browser' }: Brows
       {browserState.error && (
         <div className="browser-error">
           <span>{browserState.error}</span>
+          <button type="button" onClick={() => void api.openExternal(browserState.url || url)}>
+            Открыть во внешнем браузере
+          </button>
           {viewKind === 'chatgpt' && (
             <>
               <button type="button" onClick={() => void api.openExternal('https://chatgpt.com/auth/login')}>

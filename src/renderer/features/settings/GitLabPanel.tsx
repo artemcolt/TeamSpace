@@ -6,11 +6,15 @@ import { gitlabDefaultUrl, gitlabTokenHelpUrl } from '../../domain/constants';
 export function GitLabPanel({
   busy,
   state,
-  runAction
+  runAction,
+  setupMode = false,
+  next
 }: {
   busy: boolean;
   state: AppState;
   runAction: (action: () => Promise<AppState>, success?: string) => Promise<AppState | null>;
+  setupMode?: boolean;
+  next?: () => void;
 }) {
   const [baseUrl, setBaseUrl] = useState(state.gitlab.baseUrl || gitlabDefaultUrl);
   const [token, setToken] = useState('');
@@ -42,6 +46,17 @@ export function GitLabPanel({
     }).format(new Date(value));
   }
 
+  function saveSelection() {
+    return runAction(
+      () => api.saveGitLab({ baseUrl, token, selectedProjectIds }),
+      'Проекты исходного кода сохранены.'
+    ).then((result) => {
+      if (result) {
+        next?.();
+      }
+    });
+  }
+
   return (
     <section className="panel gitlab-panel">
       <div className="panel-title-row">
@@ -52,9 +67,10 @@ export function GitLabPanel({
         <StatusPill label="GitLab" status={state.gitlab.status} />
       </div>
       <p className="helper">
-        Подключите GitLab и выберите репозитории, которые Workspace будет считать рабочим исходным кодом.
-        Нужен Personal Access Token со scope `read_api`; если дальше потребуется чтение файлов, добавьте
-        `read_repository`.
+        {setupMode
+          ? 'Подключите GitLab Personal Access Token. Выбор рабочих репозиториев можно будет сделать позже в настройках GitLab.'
+          : 'Подключите GitLab и выберите репозитории, которые Workspace будет считать рабочим исходным кодом.'}
+        {' '}Нужен Personal Access Token со scope `read_api`; если дальше потребуется чтение файлов, добавьте `read_repository`.
         <button className="link-button" type="button" onClick={() => api.openExternal(gitlabTokenHelpUrl)}>
           Создать token
         </button>
@@ -83,47 +99,54 @@ export function GitLabPanel({
           className="primary-action"
           disabled={busy || (!token.trim() && !state.gitlab.hasToken)}
           type="button"
-          onClick={() => runAction(() => api.testGitLab({ baseUrl, token }), 'GitLab подключен.')}
-        >
-          Проверить и загрузить проекты
-        </button>
-        <button
-          className="secondary-action"
-          disabled={busy || state.gitlab.status !== 'connected'}
-          type="button"
-          onClick={() => runAction(api.syncGitLabProjects, 'Проекты GitLab обновлены.')}
-        >
-          Обновить проекты
-        </button>
-        <button
-          className="secondary-action"
-          disabled={busy}
-          type="button"
           onClick={() =>
-            runAction(
-              () => api.saveGitLab({ baseUrl, token, selectedProjectIds }),
-              'Проекты исходного кода сохранены.'
-            )
+            runAction(() => api.testGitLab({ baseUrl, token }), 'GitLab подключен.').then((result) => {
+              if (setupMode && result?.gitlab.status === 'connected') {
+                next?.();
+              }
+            })
           }
         >
-          Сохранить выбор
+          {setupMode ? 'Проверить и подключить GitLab' : 'Проверить и загрузить проекты'}
         </button>
-        <button
-          className="danger-action"
-          disabled={busy || state.gitlab.status === 'disconnected'}
-          type="button"
-          onClick={() => runAction(api.disconnectGitLab, 'GitLab отключен.')}
-        >
-          Отключить GitLab
-        </button>
+        {!setupMode && (
+          <>
+            <button
+              className="secondary-action"
+              disabled={busy || state.gitlab.status !== 'connected'}
+              type="button"
+              onClick={() => runAction(api.syncGitLabProjects, 'Проекты GitLab обновлены.')}
+            >
+              Обновить проекты
+            </button>
+            <button
+              className="secondary-action"
+              disabled={busy}
+              type="button"
+              onClick={saveSelection}
+            >
+              Сохранить выбор
+            </button>
+            <button
+              className="danger-action"
+              disabled={busy || state.gitlab.status === 'disconnected'}
+              type="button"
+              onClick={() => runAction(api.disconnectGitLab, 'GitLab отключен.')}
+            >
+              Отключить GitLab
+            </button>
+          </>
+        )}
       </div>
 
-      <div className="gitlab-summary">
-        <InfoLine label="Доступных проектов" value={String(state.gitlab.projects.length)} />
-        <InfoLine label="Выбрано репозиториев" value={String(selectedProjectIds.length)} />
-      </div>
+      {!setupMode && (
+        <div className="gitlab-summary">
+          <InfoLine label="Доступных проектов" value={String(state.gitlab.projects.length)} />
+          <InfoLine label="Выбрано репозиториев" value={String(selectedProjectIds.length)} />
+        </div>
+      )}
 
-      {state.gitlab.projects.length > 0 && (
+      {!setupMode && state.gitlab.projects.length > 0 && (
         <>
           <div className="actions compact-actions">
             <button
@@ -173,7 +196,7 @@ export function GitLabPanel({
         </>
       )}
 
-      {selectedProjects.length > 0 && (
+      {!setupMode && selectedProjects.length > 0 && (
         <p className="inline-hint">
           Выбран исходный код: {selectedProjects.map((project) => project.pathWithNamespace).join(', ')}
         </p>

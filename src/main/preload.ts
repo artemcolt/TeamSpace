@@ -191,9 +191,9 @@ contextBridge.exposeInMainWorld('teamSpace', {
       ipcRenderer.invoke('redmine:load-project-users', payload),
     selectRedmineProject: (payload: { projectId: string }) =>
       ipcRenderer.invoke('redmine:select-project', payload),
-    loadRedmineMyIssues: (payload: { projectId: string; sprintId: string }) =>
+    loadRedmineMyIssues: (payload: { projectId: string; sprintId: string; assigneeId?: string }) =>
       ipcRenderer.invoke('redmine:load-my-issues', payload),
-    syncRedmineMyIssues: (payload: { projectId: string; sprintId: string }) =>
+    syncRedmineMyIssues: (payload: { projectId: string; sprintId: string; assigneeId?: string }) =>
       ipcRenderer.invoke('redmine:sync-my-issues', payload),
     loadRedmineIssueDetails: (payload: { issueId: string }) =>
       ipcRenderer.invoke('redmine:load-issue-details', payload),
@@ -205,17 +205,20 @@ contextBridge.exposeInMainWorld('teamSpace', {
       assignee?: string;
       projectId?: string;
       sprintId?: string;
+      cacheAssigneeId?: string;
     }) => ipcRenderer.invoke('redmine:update-issue-assignee', payload),
     deleteRedmineIssue: (payload: {
       issueId: string;
       projectId?: string;
       sprintId?: string;
+      cacheAssigneeId?: string;
     }) => ipcRenderer.invoke('redmine:delete-issue', payload),
     updateRedmineIssueSprint: (payload: {
       issueId: string;
       sprintId: string;
       projectId?: string;
       previousSprintId?: string;
+      cacheAssigneeId?: string;
     }) => ipcRenderer.invoke('redmine:update-issue-sprint', payload),
     addRedmineIssueComment: (payload: { issueId: string; notes: string }) =>
       ipcRenderer.invoke('redmine:add-issue-comment', payload),
@@ -241,6 +244,7 @@ contextBridge.exposeInMainWorld('teamSpace', {
       status?: string;
       projectId?: string;
       sprintId?: string;
+      cacheAssigneeId?: string;
     }) =>
       ipcRenderer.invoke('redmine:update-issue-status', payload),
     formatRedmineIssueWithAi: (payload: {

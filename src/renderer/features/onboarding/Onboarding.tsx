@@ -3,10 +3,12 @@ import { InfoLine, SearchableSelectField, SelectField, StatusPill } from '../../
 import { api } from '../../domain/bridge';
 import { redmineHelpUrl, telegramDefaultProxyUrl } from '../../domain/constants';
 import { optionName } from '../../domain/formatters';
+import appIcon from '../../assets/app-icon.png';
+import { Browser } from '../browser/Browser';
 import { GitLabPanel } from '../settings/GitLabPanel';
 import { MailCredentialsPanel } from '../settings/MailCredentialsPanel';
 
-export type OnboardingStep = 'welcome' | 'telegram' | 'chats' | 'redmine' | 'gitlab' | 'defaults' | 'katya' | 'mail' | 'review' | 'data';
+export type OnboardingStep = 'welcome' | 'telegram' | 'chats' | 'redmine' | 'gitlab' | 'defaults' | 'katya' | 'mail' | 'review';
 type TelegramSetupStage = 'prepare' | 'credentials' | 'phone' | 'code' | 'connected';
 
 const telegramAppsUrl = 'https://my.telegram.org/apps';
@@ -18,8 +20,11 @@ export function Onboarding({
   setStep,
   onState,
   runAction,
-  onFinish,
-  onOpenMessages
+  firstRun = false,
+  readyForMainFlow,
+  katyaConfigured,
+  onKatyaConfigChange,
+  onFinish
 }: {
   busy: boolean;
   state: AppState;
@@ -27,8 +32,11 @@ export function Onboarding({
   setStep: (step: OnboardingStep) => void;
   onState: (state: AppState) => void;
   runAction: (action: () => Promise<AppState>, success?: string) => Promise<AppState | null>;
+  firstRun?: boolean;
+  readyForMainFlow: boolean;
+  katyaConfigured: boolean;
+  onKatyaConfigChange: (hasSession: boolean) => void;
   onFinish: () => void;
-  onOpenMessages: (state: AppState) => void;
 }) {
   const steps: Array<{ id: OnboardingStep; label: string }> = [
     { id: 'welcome', label: 'Сценарий' },
@@ -39,35 +47,100 @@ export function Onboarding({
     { id: 'defaults', label: 'Defaults' },
     { id: 'katya', label: 'Катя' },
     { id: 'mail', label: 'Почта' },
-    { id: 'review', label: 'Проверка' },
-    { id: 'data', label: 'Данные' }
+    { id: 'review', label: 'Проверка' }
   ];
-
-  return (
+  const setupStepStatus = (stepId: OnboardingStep) => {
+    if (stepId === 'telegram') {
+      return state.telegram.status === 'connected' ? 'Готово' : 'Не настроен';
+    }
+    if (stepId === 'chats') {
+      return state.telegram.chats.some((chat) => chat.selected) ? 'Выбраны' : 'После Telegram';
+    }
+    if (stepId === 'redmine') {
+      return state.redmine.status === 'connected' ? 'Готово' : 'Не настроен';
+    }
+    if (stepId === 'gitlab') {
+      return state.gitlab.status === 'connected' ? 'Готово' : 'Не настроен';
+    }
+    if (stepId === 'defaults') {
+      return state.workspace.defaultProjectId ? 'Готово' : 'После Redmine';
+    }
+    if (stepId === 'katya') {
+      return katyaConfigured ? 'Готово' : 'Обязательно';
+    }
+    if (stepId === 'mail') {
+      return 'Опционально';
+    }
+    if (stepId === 'review') {
+      return 'Финиш';
+    }
+    return 'Старт';
+  };
+  const setupStepDone = (stepId: OnboardingStep) => {
+    if (stepId === 'welcome') {
+      return true;
+    }
+    if (stepId === 'telegram') {
+      return state.telegram.status === 'connected';
+    }
+    if (stepId === 'chats') {
+      return state.telegram.chats.some((chat) => chat.selected);
+    }
+    if (stepId === 'redmine') {
+      return state.redmine.status === 'connected';
+    }
+    if (stepId === 'gitlab') {
+      return state.gitlab.status === 'connected';
+    }
+    if (stepId === 'defaults') {
+      return defaultsReady(state);
+    }
+    if (stepId === 'katya') {
+      return katyaConfigured;
+    }
+    return false;
+  };
+  const renderedStepButtons = (
+    <div className={firstRun ? 'setup-stepper' : 'stepper'}>
+      {steps.map((item, index) => (
+        <button
+          key={item.id}
+          className={[
+            'step',
+            step === item.id ? 'active' : '',
+            setupStepDone(item.id) ? 'done' : ''
+          ].join(' ')}
+          onClick={() => setStep(item.id)}
+          type="button"
+        >
+          {firstRun && <span className="setup-step-number" aria-hidden="true">{setupStepDone(item.id) ? '✓' : index + 1}</span>}
+          <span>{item.label}</span>
+          {firstRun && <small aria-hidden="true">{setupStepStatus(item.id)}</small>}
+        </button>
+      ))}
+    </div>
+  );
+  const currentStepLabel = steps.find((item) => item.id === step)?.label ?? '';
+  const content = (
     <>
-      <div className="stepper">
-        {steps.map((item) => (
-          <button
-            key={item.id}
-            className={step === item.id ? 'step active' : 'step'}
-            onClick={() => setStep(item.id)}
-          >
-            {item.label}
-          </button>
-        ))}
-      </div>
-
       {step === 'welcome' && (
         <section className="panel hero-panel">
-          <p className="panel-label">MVP</p>
-          <h3>Telegram messages {'->'} AI {'->'} Redmine issue</h3>
+          <p className="panel-label">{firstRun ? 'Первичная настройка' : 'MVP'}</p>
+          <h3>{firstRun ? 'Подключите рабочее пространство по шагам' : <>Telegram messages {'->'} AI {'->'} Redmine issue</>}</h3>
           <p>
-            Приложение помогает выбрать рабочие сообщения, оформить постановку через AI и сразу создать
-            задачу в Redmine.
+            {firstRun
+              ? 'Сначала добавьте Telegram, выберите чаты, затем настройте Redmine, GitLab, defaults и Катю. Почту можно подключить позже.'
+              : 'Приложение помогает выбрать рабочие сообщения, оформить постановку через AI и сразу создать задачу в Redmine.'}
           </p>
           <div className="actions">
-            <button className="primary-action" onClick={() => setStep('telegram')}>Начать настройку</button>
-            <button className="secondary-action" onClick={onFinish}>Пропустить</button>
+            <button className="primary-action" onClick={() => setStep('telegram')} type="button">
+              Начать настройку
+            </button>
+            {!firstRun && (
+              <button className="secondary-action" onClick={onFinish} type="button">
+                Пропустить
+              </button>
+            )}
           </div>
         </section>
       )}
@@ -86,7 +159,7 @@ export function Onboarding({
           busy={busy}
           state={state}
           runAction={runAction}
-          next={onOpenMessages}
+          next={() => setStep('redmine')}
         />
       )}
 
@@ -105,6 +178,8 @@ export function Onboarding({
           busy={busy}
           state={state}
           runAction={runAction}
+          setupMode
+          next={() => setStep('defaults')}
         />
       )}
 
@@ -120,7 +195,7 @@ export function Onboarding({
       {step === 'katya' && (
         <KatyaPanel
           busy={busy}
-          next={() => setStep('mail')}
+          onConfiguredChange={onKatyaConfigChange}
         />
       )}
 
@@ -135,6 +210,8 @@ export function Onboarding({
           <div className="review-grid">
             <StatusPill label="Telegram" status={state.telegram.status} />
             <StatusPill label="Redmine" status={state.redmine.status} />
+            <StatusPill label="GitLab" status={state.gitlab.status} />
+            <InfoLine label="Катя" value={katyaConfigured ? 'Настроена' : 'Не настроена'} />
             <InfoLine label="Рабочие чаты" value={String(state.telegram.chats.filter((chat) => chat.selected).length)} />
             <InfoLine label="Проект" value={optionName(state.redmine.projects, state.workspace.defaultProjectId)} />
             <InfoLine label="Tracker" value={optionName(state.redmine.trackers, state.workspace.defaultTrackerId)} />
@@ -143,18 +220,54 @@ export function Onboarding({
             <InfoLine label="Исполнитель" value={optionName(state.redmine.users, state.workspace.defaultAssigneeId)} />
           </div>
           <div className="actions">
-            <button className="primary-action" onClick={onFinish}>Перейти к сообщениям</button>
+            <button className="primary-action" disabled={!readyForMainFlow} onClick={onFinish} type="button">
+              Начать работу
+            </button>
+            {!readyForMainFlow && <span className="selection-summary">Завершите обязательные шаги настройки.</span>}
           </div>
         </section>
       )}
 
-      {step === 'data' && (
-        <LocalDataPanel
-          busy={busy}
-          state={state}
-          runAction={runAction}
-        />
-      )}
+    </>
+  );
+
+  if (firstRun) {
+    return (
+      <div className="setup-wizard">
+        <header className="setup-wizard-header">
+          <div className="brand">
+            <img className="brand-mark" src={appIcon} alt="" />
+            <div>
+              <h1>Workspace</h1>
+              <p>Первый запуск</p>
+            </div>
+          </div>
+          <div className="setup-wizard-status">
+            <StatusPill label="Telegram" status={state.telegram.status} />
+            <StatusPill label="Redmine" status={state.redmine.status} />
+            <StatusPill label="GitLab" status={state.gitlab.status} />
+            <StatusPill label="Катя" status={katyaConfigured ? 'connected' : 'disconnected'} />
+          </div>
+        </header>
+
+        <div className="setup-wizard-layout">
+          <aside className="setup-wizard-steps" aria-label="Шаги первичной настройки">
+            <p>Мастер настройки</p>
+            <h2>{currentStepLabel}</h2>
+            {renderedStepButtons}
+          </aside>
+          <section className="setup-wizard-content" aria-label={`Шаг настройки: ${currentStepLabel}`}>
+            {content}
+          </section>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      {renderedStepButtons}
+      {content}
     </>
   );
 }
@@ -200,6 +313,21 @@ export function TelegramConnectPanel({
   ];
   const currentStepIndex = telegramSetupSteps.findIndex((item) => item.id === setupStage);
   const hasCredentialsForRequest = state.telegram.hasApiCredentials || Boolean(apiId.trim() && apiHash.trim());
+  const telegramStageDone = (stage: TelegramSetupStage) => {
+    if (stage === 'prepare') {
+      return setupStage !== 'prepare' || state.telegram.status === 'connected';
+    }
+    if (stage === 'credentials') {
+      return hasCredentialsForRequest || state.telegram.status === 'connected';
+    }
+    if (stage === 'phone') {
+      return codeRequested || state.telegram.status === 'connected';
+    }
+    if (stage === 'code' || stage === 'connected') {
+      return state.telegram.status === 'connected';
+    }
+    return false;
+  };
 
   useEffect(() => {
     setCodeRequested(state.telegram.codeRequested);
@@ -270,8 +398,8 @@ export function TelegramConnectPanel({
       <p className="panel-label">Telegram configuration</p>
       <h3>Подключение Telegram</h3>
       <p className="helper">
-        Настройка идет по шагам: сначала подготовьте доступ к странице Telegram Apps, затем введите ключи,
-        телефон и код входа. Секреты не показываются после сохранения.
+        Настройка идет по шагам: сначала получите ключи на Telegram Apps, затем введите телефон и код входа.
+        MTProxy используется только для Telegram user-client, не для загрузки сайта.
       </p>
       <div className="telegram-setup-status">
         <span className={`telegram-status-dot ${state.telegram.status}`} aria-hidden="true" />
@@ -288,12 +416,13 @@ export function TelegramConnectPanel({
               className={[
                 'telegram-setup-step',
                 setupStage === item.id ? 'active' : '',
-                index < currentStepIndex ? 'complete' : ''
+                telegramStageDone(item.id) ? 'complete' : '',
+                index < currentStepIndex ? 'past' : ''
               ].join(' ')}
               disabled={!canOpenTelegramStage(item.id)}
               onClick={() => setSetupStage(item.id)}
             >
-              <span className="telegram-step-index">{index + 1}</span>
+              <span className="telegram-step-index">{telegramStageDone(item.id) ? '✓' : index + 1}</span>
               <span className="telegram-step-label">{item.label}</span>
             </button>
           ))}
@@ -303,8 +432,11 @@ export function TelegramConnectPanel({
           {setupStage === 'prepare' && (
             <>
               <p className="inline-hint">
-                Если доступ к Telegram ограничен, сначала добавьте MTProxy в Telegram. Для сайта
-                my.telegram.org нужен обычный доступ браузера или системный VPN/proxy.
+                MTProxy нужен для подключения Telegram user-client после ввода ключей. Страница{' '}
+                <button className="inline-text-button" type="button" onClick={() => api.openExternal(telegramAppsUrl)}>
+                  my.telegram.org/apps
+                </button>{' '}
+                открывается как обычный HTTPS-сайт, поэтому для нее нужен системный VPN или HTTP/SOCKS proxy.
               </p>
               <div className="form-grid">
                 <label className="wide">
@@ -317,34 +449,8 @@ export function TelegramConnectPanel({
                 </label>
               </div>
               <div className="actions">
-                <button
-                  className="secondary-action"
-                  type="button"
-                  onClick={() => {
-                    void api.copyText(proxyUrl.trim() || telegramDefaultProxyUrl);
-                    setAuthStatus('MTProxy скопирован. Его можно добавить в Telegram перед получением api_id.');
-                  }}
-                >
-                  Скопировать MTProxy
-                </button>
-                <button
-                  className="secondary-action"
-                  type="button"
-                  onClick={() => api.openExternal(proxyUrl.trim() || telegramDefaultProxyUrl)}
-                >
-                  Открыть MTProxy в Telegram
-                </button>
-                <button
-                  className="primary-action"
-                  type="button"
-                  onClick={() => api.openExternal(telegramAppsUrl)}
-                >
-                  Открыть my.telegram.org/apps
-                </button>
-              </div>
-              <div className="actions">
                 <button className="primary-action" type="button" onClick={() => setSetupStage('credentials')}>
-                  Ввести api_id и api_hash
+                  Далее
                 </button>
                 {state.telegram.hasApiCredentials && (
                   <button className="secondary-action" type="button" onClick={() => setSetupStage('phone')}>
@@ -358,35 +464,39 @@ export function TelegramConnectPanel({
           {setupStage === 'credentials' && (
             <>
               <p className="inline-hint">
-                На странице Telegram Apps создайте приложение и перенесите сюда `api_id` и `api_hash`.
+                Создайте приложение в Telegram Apps внутри Workspace, затем перенесите сюда `api_id` и `api_hash`.
               </p>
-              <div className="form-grid">
-                <label>
-                  <span>Telegram api_id</span>
-                  <input value={apiId} onChange={(event) => setApiId(event.target.value)} placeholder="123456" />
-                </label>
-                <label>
-                  <span>Telegram api_hash</span>
-                  <input
-                    type="password"
-                    value={apiHash}
-                    onChange={(event) => setApiHash(event.target.value)}
-                    placeholder={state.telegram.hasApiCredentials ? 'Сохранен в защищенном хранилище' : 'api_hash'}
-                  />
-                </label>
-              </div>
-              <div className="actions">
-                <button className="secondary-action" type="button" onClick={() => api.openExternal(telegramAppsUrl)}>
-                  Открыть my.telegram.org/apps
-                </button>
-                <button
-                  className="primary-action"
-                  disabled={!hasCredentialsForRequest}
-                  type="button"
-                  onClick={() => setSetupStage('phone')}
-                >
-                  Далее: телефон
-                </button>
+              <div className="telegram-apps-setup">
+                <div className="telegram-apps-browser">
+                  <Browser url={telegramAppsUrl} showToolbar />
+                </div>
+                <div className="telegram-apps-fields">
+                  <div className="form-grid">
+                    <label className="wide">
+                      <span>Telegram api_id</span>
+                      <input value={apiId} onChange={(event) => setApiId(event.target.value)} placeholder="123456" />
+                    </label>
+                    <label className="wide">
+                      <span>Telegram api_hash</span>
+                      <input
+                        type="password"
+                        value={apiHash}
+                        onChange={(event) => setApiHash(event.target.value)}
+                        placeholder={state.telegram.hasApiCredentials ? 'Сохранен в защищенном хранилище' : 'api_hash'}
+                      />
+                    </label>
+                  </div>
+                  <div className="actions">
+                    <button
+                      className="primary-action"
+                      disabled={!hasCredentialsForRequest}
+                      type="button"
+                      onClick={() => setSetupStage('phone')}
+                    >
+                      Далее
+                    </button>
+                  </div>
+                </div>
               </div>
             </>
           )}
@@ -398,17 +508,9 @@ export function TelegramConnectPanel({
                 который вернет Telegram.
               </p>
               <div className="form-grid">
-                <label>
+                <label className="wide">
                   <span>Номер телефона</span>
                   <input value={phone} onChange={(event) => setPhone(event.target.value)} placeholder="+7..." />
-                </label>
-                <label>
-                  <span>Telegram proxy</span>
-                  <input
-                    value={proxyUrl}
-                    onChange={(event) => setProxyUrl(event.target.value)}
-                    placeholder={telegramDefaultProxyUrl}
-                  />
                 </label>
               </div>
               <div className="actions">
@@ -421,7 +523,7 @@ export function TelegramConnectPanel({
                   type="button"
                   onClick={requestCode}
                 >
-                  {busy ? 'Запрашиваю...' : 'Получить код'}
+                  {busy ? 'Запрашиваю...' : 'Далее'}
                 </button>
               </div>
             </>
@@ -453,7 +555,7 @@ export function TelegramConnectPanel({
                   type="button"
                   onClick={connectTelegram}
                 >
-                  {busy ? 'Проверяю...' : 'Подключить Telegram'}
+                  {busy ? 'Проверяю...' : 'Далее'}
                 </button>
               </div>
             </>
@@ -516,7 +618,7 @@ export function ChatSelectionPanel({
   busy: boolean;
   state: AppState;
   runAction: (action: () => Promise<AppState>, success?: string) => Promise<AppState | null>;
-  next: (state: AppState) => void;
+  next?: () => void;
 }) {
   const [folderId, setFolderId] = useState(state.telegram.selectedFolderId);
   const [chatIds, setChatIds] = useState(state.telegram.chats.filter((chat) => chat.selected).map((chat) => chat.id));
@@ -596,11 +698,13 @@ export function ChatSelectionPanel({
               () => api.selectTelegramWorkspace({ folderId, chatIds }),
               'Рабочие чаты сохранены.'
             ).then((result) => {
-              if (result) next(result);
+              if (result) {
+                next?.();
+              }
             })
           }
         >
-          Применить и открыть сообщения
+          Применить
         </button>
       </div>
     </section>
@@ -665,34 +769,6 @@ export function RedminePanel({
           }
         >
           Проверить и сохранить ключ
-        </button>
-        <button
-          className="secondary-action"
-          disabled={busy}
-          onClick={() =>
-            runAction(
-              () =>
-                api.saveRedmine({
-                  baseUrl,
-                  apiKey,
-                  defaultProjectId: state.workspace.defaultProjectId,
-                  defaultTrackerId: state.workspace.defaultTrackerId,
-                  defaultPriorityId: state.workspace.defaultPriorityId,
-                  defaultSprintId: state.workspace.defaultSprintId,
-                  defaultAssigneeId: state.workspace.defaultAssigneeId
-                }),
-              'Настройки Redmine сохранены.'
-            )
-          }
-        >
-          Сохранить настройки
-        </button>
-        <button
-          className="danger-action"
-          disabled={busy || state.redmine.status === 'disconnected'}
-          onClick={() => runAction(api.disconnectRedmine, 'Redmine отключен.')}
-        >
-          Отключить Redmine
         </button>
       </div>
     </section>
@@ -790,8 +866,10 @@ export function DefaultsPanel({
                   defaultAssigneeId: assigneeId
                 }),
               'Defaults сохранены.'
-            ).then((result) => {
-              if (result) next?.();
+            ).then((nextState) => {
+              if (nextState) {
+                next?.();
+              }
             })
           }
         >
@@ -802,12 +880,24 @@ export function DefaultsPanel({
   );
 }
 
+function defaultsReady(state: AppState) {
+  const trackerReady = state.redmine.trackers.length === 0 || Boolean(state.workspace.defaultTrackerId);
+  const priorityReady = state.redmine.priorities.length === 0 || Boolean(state.workspace.defaultPriorityId);
+  return Boolean(
+    state.workspace.defaultProjectId &&
+    trackerReady &&
+    priorityReady &&
+    state.workspace.defaultSprintId &&
+    state.workspace.defaultAssigneeId
+  );
+}
+
 export function KatyaPanel({
   busy,
-  next
+  onConfiguredChange
 }: {
   busy: boolean;
-  next?: () => void;
+  onConfiguredChange?: (hasSession: boolean) => void;
 }) {
   const [sessionCookie, setSessionCookie] = useState('');
   const [statusText, setStatusText] = useState('');
@@ -833,6 +923,7 @@ export function KatyaPanel({
       await api.saveKatyaSession({ sessionCookie: trimmedSession });
       setSessionCookie('');
       setHasSavedSession(true);
+      onConfiguredChange?.(true);
       setStatusText('Сессия Кати сохранена.');
     } catch (error) {
       setStatusText(error instanceof Error ? error.message : 'Не удалось сохранить сессию Кати.');
@@ -845,7 +936,7 @@ export function KatyaPanel({
       <h3>Сервис записи Катя</h3>
       <p className="helper">
         Сохраните `callrec_session` один раз. Вкладка встреч будет использовать его для списка записей,
-        транскрипций и протоколов.
+        транскрипций и протоколов. Группа доступа указывается отдельно при приглашении Кати в конкретный созвон.
       </p>
       <div className="form-grid">
         <label className="wide">

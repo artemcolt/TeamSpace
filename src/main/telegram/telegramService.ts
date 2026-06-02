@@ -57,6 +57,92 @@ export interface TelegramServiceEvents {
   onNewMessage?: (event: TelegramNewMessageEvent) => void;
 }
 
+function assertProxyPort(port: number): number {
+  if (!Number.isInteger(port) || port <= 0 || port > 65535) {
+    throw new Error('Telegram proxy требует корректный port.');
+  }
+  return port;
+}
+
+function parseMtProxyUrl(url: URL): ProxyInterface {
+  const secret = url.searchParams.get('secret') || url.password;
+  if (!url.hostname) {
+    throw new Error('MTProxy требует server.');
+  }
+  if (!secret) {
+    throw new Error('MTProxy требует secret.');
+  }
+  return {
+    ip: url.hostname,
+    port: assertProxyPort(Number(url.port)),
+    secret,
+    MTProxy: true,
+    timeout: 10
+  };
+}
+
+function parseTelegramProxyDeepLink(url: URL): ProxyInterface {
+  const server = url.searchParams.get('server')?.trim() ?? '';
+  const port = url.searchParams.get('port')?.trim() ?? '';
+  const secret = url.searchParams.get('secret')?.trim() ?? '';
+  if (!server) {
+    throw new Error('Telegram proxy link требует server.');
+  }
+  if (!secret) {
+    throw new Error('Telegram proxy link требует secret.');
+  }
+  return {
+    ip: server,
+    port: assertProxyPort(Number(port)),
+    secret,
+    MTProxy: true,
+    timeout: 10
+  };
+}
+
+export function parseTelegramProxy(proxyUrl: string): ProxyInterface | undefined {
+  const trimmed = proxyUrl.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+
+  let url: URL;
+  try {
+    url = new URL(trimmed);
+  } catch {
+    throw new Error(
+      'Telegram proxy должен быть mtproxy://, https://t.me/proxy?... или socks5://, socks5h://, socks4://.'
+    );
+  }
+
+  if (
+    (url.protocol === 'https:' || url.protocol === 'http:') &&
+    (url.hostname === 't.me' || url.hostname === 'telegram.me') &&
+    url.pathname === '/proxy'
+  ) {
+    return parseTelegramProxyDeepLink(url);
+  }
+
+  if (url.protocol === 'mtproxy:') {
+    return parseMtProxyUrl(url);
+  }
+
+  if (url.protocol !== 'socks5:' && url.protocol !== 'socks5h:' && url.protocol !== 'socks4:') {
+    throw new Error(
+      'Telegram proxy должен быть mtproxy://, https://t.me/proxy?... или socks5://, socks5h://, socks4://.'
+    );
+  }
+
+  return {
+    ip: url.hostname,
+    port: assertProxyPort(Number(url.port)),
+    socksType: url.protocol === 'socks4:' ? 4 : 5,
+    username: url.username ? decodeURIComponent(url.username) : undefined,
+    password: url.password ? decodeURIComponent(url.password) : undefined,
+    timeout: 10
+  };
+}
+
 export class TelegramService {
   private telegramClient: TelegramClient | null = null;
   private pendingTelegramLogin: PendingTelegramLogin | null = null;
@@ -573,7 +659,7 @@ export class TelegramService {
     const nextClient = new TelegramClient(stringSession, credentials.apiId, credentials.apiHash, {
       connectionRetries: 2,
       retryDelay: 750,
-      proxy: this.parseProxy(proxyUrl)
+      proxy: parseTelegramProxy(proxyUrl)
     });
     this.telegramClient = nextClient;
     const connectionPromise = withTimeout(nextClient.connect(), 15000, 'Telegram connect')
@@ -610,41 +696,6 @@ export class TelegramService {
 
   private serializeSession(client: TelegramClient): string {
     return (client.session as StringSession).save();
-  }
-
-  private parseProxy(proxyUrl: string): ProxyInterface | undefined {
-    const trimmed = proxyUrl.trim();
-    if (!trimmed) {
-      return undefined;
-    }
-
-    const url = new URL(trimmed);
-    if (url.protocol === 'mtproxy:') {
-      const secret = url.searchParams.get('secret') || url.password;
-      if (!secret) {
-        throw new Error('MTProxy требует secret.');
-      }
-      return {
-        ip: url.hostname,
-        port: Number(url.port),
-        secret,
-        MTProxy: true,
-        timeout: 10
-      };
-    }
-
-    if (url.protocol !== 'socks5:' && url.protocol !== 'socks5h:' && url.protocol !== 'socks4:') {
-      throw new Error('Telegram proxy должен быть mtproxy://, socks5://, socks5h:// или socks4://.');
-    }
-
-    return {
-      ip: url.hostname,
-      port: Number(url.port),
-      socksType: url.protocol === 'socks4:' ? 4 : 5,
-      username: url.username ? decodeURIComponent(url.username) : undefined,
-      password: url.password ? decodeURIComponent(url.password) : undefined,
-      timeout: 10
-    };
   }
 
   private entityType(entity: unknown): TelegramChat['type'] {

@@ -10,10 +10,9 @@ import {
 } from 'react';
 import { ImageLightbox } from '../../components/common';
 import { api } from '../../domain/bridge';
+import { katyaAccessGroupStorageKey, katyaDefaultBaseUrl } from '../../domain/constants';
 import { formatChatTime, formatDate, initials } from '../../domain/formatters';
 
-const katyaDefaultBaseUrl = 'http://localhost:8077';
-const defaultRecordingGroupId = '';
 const katyaMeetingStoragePrefix = 'team-space:katya-meeting-id:';
 const composerTextareaMaxHeight = 160;
 const initialRenderedMessageLimit = 160;
@@ -656,8 +655,13 @@ export function Inbox({
     setTelemostStatusText('');
     try {
       const sessionCookie = await api.getKatyaSession();
+      const accessGroupId = window.localStorage.getItem(katyaAccessGroupStorageKey)?.trim() ?? '';
       if (!sessionCookie.trim()) {
         setTelemostStatusText('Нет сохраненной сессии Кати.');
+        return;
+      }
+      if (!accessGroupId) {
+        setTelemostStatusText('Укажите группу доступа во вкладке «Встречи» или настройках Кати.');
         return;
       }
 
@@ -666,7 +670,7 @@ export function Inbox({
         sessionCookie,
         url,
         title: dailyMeetingTitle(),
-        groupId: defaultRecordingGroupId || undefined
+        groupId: accessGroupId
       });
       window.localStorage.setItem(katyaMeetingStorageKey(url), meeting.id);
       setTelemostStatusText('Катя приглашена.');

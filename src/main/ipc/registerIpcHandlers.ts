@@ -2207,10 +2207,10 @@ export function registerIpcHandlers(
   ipcMain.handle('redmine:select-project', (_event, payload: { projectId: string }) =>
     redmine.selectProject(payload));
 
-  ipcMain.handle('redmine:load-my-issues', (_event, payload: { projectId: string; sprintId: string }) =>
+  ipcMain.handle('redmine:load-my-issues', (_event, payload: { projectId: string; sprintId: string; assigneeId?: string }) =>
     redmine.loadMyIssues(payload));
 
-  ipcMain.handle('redmine:sync-my-issues', (_event, payload: { projectId: string; sprintId: string }) =>
+  ipcMain.handle('redmine:sync-my-issues', (_event, payload: { projectId: string; sprintId: string; assigneeId?: string }) =>
     redmine.syncMyIssues(payload));
 
   ipcMain.handle('redmine:load-issue-details', (_event, payload: { issueId: string }) =>
@@ -2251,6 +2251,7 @@ export function registerIpcHandlers(
     status?: string;
     projectId?: string;
     sprintId?: string;
+    cacheAssigneeId?: string;
   }) =>
     redmine.updateIssueStatus(payload));
 
