@@ -1,0 +1,84 @@
+{
+  "name": "team-space-desktop",
+  "productName": "Workspace",
+  "version": "0.1.0",
+  "description": "Electron + React + TypeScript desktop app stub.",
+  "main": "dist-electron/main.js",
+  "scripts": {
+    "dev": "npm run build:electron && concurrently -k \"vite --host 127.0.0.1\" \"wait-on http://127.0.0.1:5174 && cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:5174 node scripts/run-workspace-electron.mjs\"",
+    "build:electron": "tsc -p tsconfig.electron.json",
+    "build:renderer": "tsc -p tsconfig.json && vite build",
+    "build": "npm run build:electron && npm run build:renderer && electron-builder",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.electron.json --noEmit",
+    "preview": "vite preview --host 127.0.0.1"
+  },
+  "dependencies": {
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6",
+    "sql.js": "^1.14.1",
+    "telegram": "^2.26.22"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.1",
+    "@types/node": "^22.10.2",
+    "@types/react": "^19.0.2",
+    "@types/react-dom": "^19.0.2",
+    "@vitejs/plugin-react": "^4.7.0",
+    "concurrently": "^9.1.2",
+    "cross-env": "^7.0.3",
+    "electron": "^33.2.1",
+    "electron-builder": "^25.1.8",
+    "jsdom": "^29.1.1",
+    "typescript": "^5.9.3",
+    "vite": "^6.4.2",
+    "vitest": "^4.1.7",
+    "wait-on": "^8.0.1"
+  },
+  "build": {
+    "appId": "com.teamspace.desktop",
+    "productName": "Workspace",
+    "npmRebuild": false,
+    "icon": "build/icon",
+    "directories": {
+      "output": "release"
+    },
+    "extraResources": [
+      {
+        "from": "build/icon.png",
+        "to": "icon.png"
+      },
+      {
+        "from": "build/icon.ico",
+        "to": "icon.ico"
+      }
+    ],
+    "files": [
+      "dist-electron/**/*",
+      "dist/renderer/**/*",
+      "package.json"
+    ],
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Utility"
+    },
+    "mac": {
+      "identity": null,
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "Team Space records your microphone when you start meeting recording.",
+        "NSCameraUsageDescription": "Team Space may request screen media access to record meeting audio.",
+        "NSAudioCaptureUsageDescription": "Team Space records system audio when you start meeting recording."
+      }
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    }
+  }
+}
