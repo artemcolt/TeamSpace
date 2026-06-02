@@ -18,6 +18,7 @@ import type {
   GitLabProjectWorkspaceResult,
   KatyaDailyAnalysisAiResult,
   KatyaDailyAnalysisPayload,
+  KatyaAccessGroup,
   KatyaMeetingDetail,
   KatyaMeetingListResponse,
   KatyaMeetingSummary,
@@ -274,6 +275,32 @@ function normalizeKatyaCookie(value: string): string {
 
 function normalizeKatyaBaseUrl(value: string): string {
   return value.trim().replace(/\/+$/, '') || 'http://localhost:8077';
+}
+
+function savedKatyaBaseUrl(store: LocalStore): string {
+  return normalizeKatyaBaseUrl(store.getSecret('katyaBaseUrl') ?? process.env.KATYA_BASE_URL ?? '');
+}
+
+function normalizeKatyaGroups(payload: unknown): KatyaAccessGroup[] {
+  const rawGroups = Array.isArray(payload)
+    ? payload
+    : payload && typeof payload === 'object' && Array.isArray((payload as { data?: unknown }).data)
+      ? (payload as { data: unknown[] }).data
+      : [];
+
+  return rawGroups
+    .map((item) => {
+      if (!item || typeof item !== 'object') {
+        return null;
+      }
+      const record = item as Record<string, unknown>;
+      const rawId = record.id ?? record.group_id ?? record.uuid;
+      const rawName = record.name ?? record.title ?? record.display_name ?? record.group_name;
+      const id = typeof rawId === 'string' || typeof rawId === 'number' ? String(rawId) : '';
+      const name = typeof rawName === 'string' && rawName.trim() ? rawName.trim() : id;
+      return id ? { id, name } : null;
+    })
+    .filter((item): item is KatyaAccessGroup => Boolean(item));
 }
 
 async function requestKatyaJson<T>(
@@ -2045,11 +2072,27 @@ export function registerIpcHandlers(
   ipcMain.handle('katya:me', (_event, payload: { baseUrl: string; sessionCookie: string }) =>
     requestKatyaJson(payload.baseUrl, payload.sessionCookie, '/auth/me'));
 
+  ipcMain.handle('katya:get-base-url', () => savedKatyaBaseUrl(store));
+
+  ipcMain.handle('katya:save-base-url', (_event, payload: { baseUrl: string }) => {
+    store.setSecret('katyaBaseUrl', normalizeKatyaBaseUrl(payload.baseUrl));
+  });
+
+  ipcMain.handle('katya:save-settings', (_event, payload: { baseUrl: string; sessionCookie?: string }) => {
+    store.setSecret('katyaBaseUrl', normalizeKatyaBaseUrl(payload.baseUrl));
+    if (payload.sessionCookie?.trim()) {
+      store.setSecret('katyaSessionCookie', payload.sessionCookie);
+    }
+  });
+
   ipcMain.handle('katya:get-session', () => store.getSecret('katyaSessionCookie') ?? '');
 
   ipcMain.handle('katya:save-session', (_event, payload: { sessionCookie: string }) => {
     store.setSecret('katyaSessionCookie', payload.sessionCookie);
   });
+
+  ipcMain.handle('katya:list-groups', async (_event, payload: { baseUrl: string; sessionCookie: string }) =>
+    normalizeKatyaGroups(await requestKatyaJson(payload.baseUrl, payload.sessionCookie, '/api/v1/groups')));
 
   ipcMain.handle('katya:create-meeting', (_event, payload: {
     baseUrl: string;

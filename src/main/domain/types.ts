@@ -232,6 +232,11 @@ export interface KatyaMeeting {
   group_id?: string;
 }
 
+export interface KatyaAccessGroup {
+  id: string;
+  name: string;
+}
+
 export interface KatyaMeetingSegment {
   start: number;
   end: number;
@@ -435,6 +440,7 @@ export interface AppState {
 export interface SecretFile {
   redmineApiKey?: string;
   katyaSessionCookie?: string;
+  katyaBaseUrl?: string;
   telegramSession?: string;
   telegramApiCredentials?: string;
   telegramProxyUrl?: string;

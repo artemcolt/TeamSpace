@@ -220,14 +220,14 @@ function speakerLabel(meeting: KatyaMeetingDetail | KatyaMeetingSummary, speaker
   return match ? `Спикер ${Number(match[1]) + 1}` : 'Спикер';
 }
 
-function mediaUrl(value?: string): string {
+function mediaUrl(value?: string, baseUrl = katyaDefaultBaseUrl): string {
   if (!value) {
     return '';
   }
   if (/^https?:\/\//i.test(value)) {
     return value;
   }
-  return new URL(value, katyaDefaultBaseUrl).toString();
+  return new URL(value, baseUrl).toString();
 }
 
 function escapeHtml(value: string) {
@@ -359,9 +359,28 @@ function MeetingMarkdown({ value }: { value: string }) {
   );
 }
 
+function katyaErrorMessage(error: unknown, fallback: string): string {
+  const message = error instanceof Error ? error.message : String(error ?? '');
+  if (
+    /fetch failed/i.test(message) ||
+    /ECONNREFUSED/i.test(message) ||
+    /ERR_CONNECTION/i.test(message) ||
+    /Failed to fetch/i.test(message)
+  ) {
+    return 'Сервис Кати недоступен. Проверьте URL сервиса в настройках и что сервис записи запущен.';
+  }
+
+  if (/401|403|unauthorized|forbidden/i.test(message)) {
+    return 'Сессия Кати недействительна. Обновите callrec_session в настройках.';
+  }
+
+  return message || fallback;
+}
+
 export function Meetings({ onOpenSettings }: { onOpenSettings: () => void }) {
   const [mode, setMode] = useState<MeetingsMode>('call');
   const [address, setAddress] = useState(defaultTelemostUrl);
+  const [katyaBaseUrl, setKatyaBaseUrl] = useState(katyaDefaultBaseUrl);
   const [katyaSessionCookie, setKatyaSessionCookie] = useState('');
   const [katyaMeetingId, setKatyaMeetingId] = useState(() =>
     window.localStorage.getItem(katyaMeetingStorageKey) ?? ''
@@ -369,6 +388,8 @@ export function Meetings({ onOpenSettings }: { onOpenSettings: () => void }) {
   const [accessGroupId, setAccessGroupId] = useState(() =>
     window.localStorage.getItem(katyaAccessGroupStorageKey) ?? ''
   );
+  const [accessGroups, setAccessGroups] = useState<KatyaAccessGroup[]>([]);
+  const [accessGroupsBusy, setAccessGroupsBusy] = useState(false);
   const [savedTelemostLinks, setSavedTelemostLinks] = useState<SavedTelemostLink[]>(readSavedTelemostLinks);
   const [busy, setBusy] = useState(false);
   const [statusText, setStatusText] = useState('Готово к дейлику.');
@@ -408,6 +429,8 @@ export function Meetings({ onOpenSettings }: { onOpenSettings: () => void }) {
   const allVisibleMeetingsSelected = meetings.length > 0 && meetings.every((meeting) =>
     selectedAnalysisMeetingIdsSet.has(meeting.id)
   );
+  const selectedAccessGroupMissing = Boolean(accessGroupId.trim()) &&
+    !accessGroups.some((group) => group.id === accessGroupId);
   const sortedSavedAnalyses = useMemo(
     () => [...savedAnalyses].sort((first, second) =>
       new Date(second.createdAt || 0).getTime() - new Date(first.createdAt || 0).getTime()
@@ -422,8 +445,9 @@ export function Meetings({ onOpenSettings }: { onOpenSettings: () => void }) {
   );
 
   useEffect(() => {
-    api.getKatyaSession()
-      .then((savedSessionCookie) => {
+    Promise.all([api.getKatyaSession(), api.getKatyaBaseUrl()])
+      .then(([savedSessionCookie, savedBaseUrl]) => {
+        setKatyaBaseUrl(savedBaseUrl || katyaDefaultBaseUrl);
         if (savedSessionCookie) {
           setKatyaSessionCookie(savedSessionCookie);
           setRecordingsLoaded(false);
@@ -437,6 +461,12 @@ export function Meetings({ onOpenSettings }: { onOpenSettings: () => void }) {
       void loadMeetings(1);
     }
   }, [hasSession, listBusy, mode, recordingsLoaded]);
+
+  useEffect(() => {
+    if (mode === 'call' && hasSession && accessGroups.length === 0 && !accessGroupsBusy) {
+      void loadAccessGroups();
+    }
+  }, [accessGroups.length, accessGroupsBusy, hasSession, mode]);
 
   useEffect(() => {
     if (mode === 'analyses' && !savedAnalysesLoaded && !savedAnalysesBusy) {
@@ -528,6 +558,30 @@ export function Meetings({ onOpenSettings }: { onOpenSettings: () => void }) {
     setStatusText('Ссылка удалена из списка.');
   }
 
+  async function loadAccessGroups() {
+    if (!katyaSessionCookie.trim()) {
+      setStatusText('Нет сохраненной сессии Кати. Откройте настройки и сохраните callrec_session.');
+      return;
+    }
+
+    setAccessGroupsBusy(true);
+    try {
+      const groups = await api.listKatyaGroups({
+        baseUrl: katyaBaseUrl,
+        sessionCookie: katyaSessionCookie
+      });
+      setAccessGroups(groups);
+      if (!accessGroupId.trim() && groups[0]) {
+        setAccessGroupId(groups[0].id);
+        window.localStorage.setItem(katyaAccessGroupStorageKey, groups[0].id);
+      }
+    } catch (error) {
+      setStatusText(katyaErrorMessage(error, 'Не удалось загрузить группы доступа Кати.'));
+    } finally {
+      setAccessGroupsBusy(false);
+    }
+  }
+
   async function inviteKatya() {
     const nextUrl = normalizeTelemostUrl(address);
     const trimmedAccessGroupId = accessGroupId.trim();
@@ -549,10 +603,10 @@ export function Meetings({ onOpenSettings }: { onOpenSettings: () => void }) {
 
     window.localStorage.setItem(katyaAccessGroupStorageKey, trimmedAccessGroupId);
     setBusy(true);
-    setStatusText('Приглашаю Катю.');
+      setStatusText('Приглашаю Катю.');
     try {
       const meeting = await api.createKatyaMeeting({
-        baseUrl: katyaDefaultBaseUrl,
+        baseUrl: katyaBaseUrl,
         sessionCookie: katyaSessionCookie,
         url: nextUrl,
         title,
@@ -567,7 +621,7 @@ export function Meetings({ onOpenSettings }: { onOpenSettings: () => void }) {
       });
       setStatusText('Катя приглашена на созвон.');
     } catch (error) {
-      setStatusText(error instanceof Error ? error.message : 'Не удалось пригласить Катю.');
+      setStatusText(katyaErrorMessage(error, 'Не удалось пригласить Катю.'));
     } finally {
       setBusy(false);
     }
@@ -583,7 +637,7 @@ export function Meetings({ onOpenSettings }: { onOpenSettings: () => void }) {
     setStatusText('Удаляю Катю со встречи.');
     try {
       await api.stopKatyaMeeting({
-        baseUrl: katyaDefaultBaseUrl,
+        baseUrl: katyaBaseUrl,
         sessionCookie: katyaSessionCookie,
         meetingId: katyaMeetingId
       });
@@ -591,7 +645,7 @@ export function Meetings({ onOpenSettings }: { onOpenSettings: () => void }) {
       window.localStorage.removeItem(katyaMeetingStorageKey);
       setStatusText('Катя удалена со встречи.');
     } catch (error) {
-      setStatusText(error instanceof Error ? error.message : 'Не удалось удалить Катю.');
+      setStatusText(katyaErrorMessage(error, 'Не удалось удалить Катю.'));
     } finally {
       setBusy(false);
     }
@@ -608,7 +662,7 @@ export function Meetings({ onOpenSettings }: { onOpenSettings: () => void }) {
     setRecordingsError('');
     try {
       const response = await api.listKatyaMeetings({
-        baseUrl: katyaDefaultBaseUrl,
+        baseUrl: katyaBaseUrl,
         sessionCookie: katyaSessionCookie,
         page,
         pageSize: katyaMeetingsPageSize
@@ -628,7 +682,12 @@ export function Meetings({ onOpenSettings }: { onOpenSettings: () => void }) {
         setSelectedMeeting(null);
       }
     } catch (error) {
-      setRecordingsError(error instanceof Error ? error.message : 'Не удалось загрузить встречи.');
+      setMeetings([]);
+      setMeetingsTotal(0);
+      setSelectedMeetingId('');
+      setSelectedMeeting(null);
+      setSelectedAnalysisMeetingIds([]);
+      setRecordingsError(katyaErrorMessage(error, 'Не удалось загрузить встречи.'));
     } finally {
       setListBusy(false);
     }
@@ -643,7 +702,7 @@ export function Meetings({ onOpenSettings }: { onOpenSettings: () => void }) {
     setRecordingsError('');
     try {
       const meeting = await api.getKatyaMeeting({
-        baseUrl: katyaDefaultBaseUrl,
+        baseUrl: katyaBaseUrl,
         sessionCookie: katyaSessionCookie,
         meetingId
       });
@@ -651,7 +710,7 @@ export function Meetings({ onOpenSettings }: { onOpenSettings: () => void }) {
       setSelectedMeetingId(meeting.id);
     } catch (error) {
       setSelectedMeeting(null);
-      setRecordingsError(error instanceof Error ? error.message : 'Не удалось открыть встречу.');
+      setRecordingsError(katyaErrorMessage(error, 'Не удалось открыть встречу.'));
     } finally {
       setDetailBusy(false);
     }
@@ -721,7 +780,7 @@ export function Meetings({ onOpenSettings }: { onOpenSettings: () => void }) {
     setRecordingsError('');
     try {
       const result = await api.analyzeKatyaDailies({
-        baseUrl: katyaDefaultBaseUrl,
+        baseUrl: katyaBaseUrl,
         sessionCookie: katyaSessionCookie,
         meetingIds: selectedAnalysisMeetingIds,
         analysisPrompt: analysisPrompt.trim()
@@ -734,7 +793,7 @@ export function Meetings({ onOpenSettings }: { onOpenSettings: () => void }) {
       ]);
       setMode('analyses');
     } catch (error) {
-      setRecordingsError(error instanceof Error ? error.message : 'Не удалось проанализировать дэйлики.');
+      setRecordingsError(katyaErrorMessage(error, 'Не удалось проанализировать дэйлики.'));
     } finally {
       setAnalysisBusy(false);
     }
@@ -923,15 +982,27 @@ export function Meetings({ onOpenSettings }: { onOpenSettings: () => void }) {
 
           <label className="simple-meeting-address">
             <span>Группа доступа</span>
-            <input
+            <select
               value={accessGroupId}
               onChange={(event) => {
                 const nextAccessGroupId = event.target.value;
                 setAccessGroupId(nextAccessGroupId);
                 window.localStorage.setItem(katyaAccessGroupStorageKey, nextAccessGroupId.trim());
               }}
-              placeholder="ID группы в Кате"
-            />
+              disabled={accessGroupsBusy || accessGroups.length === 0}
+            >
+              <option value="">
+                {accessGroupsBusy ? 'Загрузка групп...' : 'Выберите группу'}
+              </option>
+              {selectedAccessGroupMissing && (
+                <option value={accessGroupId}>{accessGroupId}</option>
+              )}
+              {accessGroups.map((group) => (
+                <option key={group.id} value={group.id}>
+                  {group.name}
+                </option>
+              ))}
+            </select>
           </label>
 
           <div className="simple-meeting-actions">
@@ -943,6 +1014,14 @@ export function Meetings({ onOpenSettings }: { onOpenSettings: () => void }) {
             </button>
             <button className="secondary-action" disabled={busy} onClick={onOpenSettings} type="button">
               Настроить Катю
+            </button>
+            <button
+              className="secondary-action"
+              disabled={busy || accessGroupsBusy || !hasSession}
+              onClick={() => void loadAccessGroups()}
+              type="button"
+            >
+              {accessGroupsBusy ? 'Группы...' : 'Обновить группы'}
             </button>
             <button className="primary-action" disabled={busy} onClick={inviteKatya} type="button">
               Пригласить Катю
@@ -1223,7 +1302,7 @@ export function Meetings({ onOpenSettings }: { onOpenSettings: () => void }) {
                         className="meeting-video"
                         controls
                         preload="metadata"
-                        src={mediaUrl((detail as KatyaMeetingDetail).video_url)}
+                        src={mediaUrl((detail as KatyaMeetingDetail).video_url, katyaBaseUrl)}
                       />
                       <button
                         type="button"

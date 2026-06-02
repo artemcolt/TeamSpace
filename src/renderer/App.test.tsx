@@ -223,8 +223,15 @@ function installBridge(initialState: AppState) {
       error: ''
     })),
     openTelemost: vi.fn(async () => undefined),
+    getKatyaBaseUrl: vi.fn(async () => 'http://localhost:8077'),
+    saveKatyaBaseUrl: vi.fn(async () => undefined),
+    saveKatyaSettings: vi.fn(async () => undefined),
     getKatyaSession: vi.fn(async () => 'test-session'),
     saveKatyaSession: vi.fn(async () => undefined),
+    listKatyaGroups: vi.fn(async (): Promise<KatyaAccessGroup[]> => [
+      { id: 'group-access-1', name: 'Команда разработки' },
+      { id: 'group-access-2', name: 'Дэйлики' }
+    ]),
     getKatyaMe: vi.fn(async () => ({
       email: 'user@example.com',
       enabled: true,
@@ -1981,6 +1988,22 @@ describe('App', () => {
     expect(screen.getByText(/проверить одновременную запись/)).toBeInTheDocument();
   });
 
+  it('shows a readable Katya service error when recordings cannot be loaded', async () => {
+    const api = installBridge(connectedState());
+    api.getKatyaSession.mockResolvedValue('test-session');
+    api.listKatyaMeetings.mockRejectedValue(new Error(
+      "Error invoking remote method 'katya:list-meetings': TypeError: fetch failed"
+    ));
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByRole('button', { name: 'Встречи' }));
+    await user.click(screen.getByRole('tab', { name: 'Записи' }));
+
+    expect(await screen.findByText(/Сервис Кати недоступен/)).toBeInTheDocument();
+    expect(screen.queryByText(/Error invoking remote method/)).not.toBeInTheDocument();
+  });
+
   it('passes access group when inviting Katya from Meetings', async () => {
     const api = installBridge(connectedState());
     api.getKatyaSession.mockResolvedValue('test-session');
@@ -1988,7 +2011,13 @@ describe('App', () => {
     render(<App />);
 
     await user.click(await screen.findByRole('button', { name: 'Встречи' }));
-    await user.type(screen.getByLabelText('Группа доступа'), 'group-access-2');
+    await waitFor(() =>
+      expect(api.listKatyaGroups).toHaveBeenCalledWith({
+        baseUrl: 'http://localhost:8077',
+        sessionCookie: 'test-session'
+      })
+    );
+    await user.selectOptions(screen.getByLabelText('Группа доступа'), 'group-access-2');
     await user.click(screen.getByRole('button', { name: 'Пригласить Катю' }));
 
     await waitFor(() =>
@@ -2071,20 +2100,25 @@ describe('App', () => {
     expect(screen.getAllByText(/12 встреч/).length).toBeGreaterThan(0);
   });
 
-  it('saves Katya session only from Settings', async () => {
+  it('saves Katya URL and session only from Settings', async () => {
     const api = installBridge(connectedState());
     const user = userEvent.setup();
     render(<App />);
 
     await user.click(await screen.findByRole('button', { name: 'Настройки' }));
     await user.click(screen.getByRole('button', { name: 'Катя' }));
+    await user.clear(await screen.findByLabelText('URL сервиса Кати'));
+    await user.type(screen.getByLabelText('URL сервиса Кати'), 'https://katya.example.com/');
     await user.type(screen.getByLabelText('callrec_session'), 'settings-session');
-    await user.click(screen.getByRole('button', { name: 'Сохранить сессию' }));
+    await user.click(screen.getByRole('button', { name: 'Сохранить настройки' }));
 
     await waitFor(() =>
-      expect(api.saveKatyaSession).toHaveBeenCalledWith({ sessionCookie: 'settings-session' })
+      expect(api.saveKatyaSettings).toHaveBeenCalledWith({
+        baseUrl: 'https://katya.example.com/',
+        sessionCookie: 'settings-session'
+      })
     );
-    expect(await screen.findByText('Сессия Кати сохранена.')).toBeInTheDocument();
+    expect(await screen.findByText('Настройки Кати сохранены.')).toBeInTheDocument();
     expect(screen.queryByLabelText('Группа доступа')).not.toBeInTheDocument();
   });
 

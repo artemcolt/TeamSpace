@@ -116,9 +116,16 @@ contextBridge.exposeInMainWorld('teamSpace', {
     openTelemost: (url: string) => ipcRenderer.invoke('telemost:open', url),
     getKatyaMe: (payload: { baseUrl: string; sessionCookie: string }) =>
       ipcRenderer.invoke('katya:me', payload),
+    getKatyaBaseUrl: () => ipcRenderer.invoke('katya:get-base-url'),
+    saveKatyaBaseUrl: (payload: { baseUrl: string }) =>
+      ipcRenderer.invoke('katya:save-base-url', payload),
+    saveKatyaSettings: (payload: { baseUrl: string; sessionCookie?: string }) =>
+      ipcRenderer.invoke('katya:save-settings', payload),
     getKatyaSession: () => ipcRenderer.invoke('katya:get-session'),
     saveKatyaSession: (payload: { sessionCookie: string }) =>
       ipcRenderer.invoke('katya:save-session', payload),
+    listKatyaGroups: (payload: { baseUrl: string; sessionCookie: string }) =>
+      ipcRenderer.invoke('katya:list-groups', payload),
     createKatyaMeeting: (payload: {
       baseUrl: string;
       sessionCookie: string;

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { InfoLine, SearchableSelectField, SelectField, StatusPill } from '../../components/common';
 import { api } from '../../domain/bridge';
-import { redmineHelpUrl, telegramDefaultProxyUrl } from '../../domain/constants';
+import { katyaDefaultBaseUrl, redmineHelpUrl, telegramDefaultProxyUrl } from '../../domain/constants';
 import { optionName } from '../../domain/formatters';
 import appIcon from '../../assets/app-icon.png';
 import { GitLabPanel } from '../settings/GitLabPanel';
@@ -833,13 +833,15 @@ export function KatyaPanel({
   busy: boolean;
   onConfiguredChange?: (hasSession: boolean) => void;
 }) {
+  const [baseUrl, setBaseUrl] = useState(katyaDefaultBaseUrl);
   const [sessionCookie, setSessionCookie] = useState('');
   const [statusText, setStatusText] = useState('');
   const [hasSavedSession, setHasSavedSession] = useState(false);
 
   useEffect(() => {
-    api.getKatyaSession()
-      .then((savedSessionCookie) => {
+    Promise.all([api.getKatyaSession(), api.getKatyaBaseUrl()])
+      .then(([savedSessionCookie, savedBaseUrl]) => {
+        setBaseUrl(savedBaseUrl || katyaDefaultBaseUrl);
         setHasSavedSession(Boolean(savedSessionCookie));
       })
       .catch(() => undefined);
@@ -847,20 +849,30 @@ export function KatyaPanel({
 
   async function saveSession() {
     const trimmedSession = sessionCookie.trim();
-    if (!trimmedSession) {
+    const trimmedBaseUrl = baseUrl.trim();
+    if (!trimmedBaseUrl) {
+      setStatusText('Укажите URL сервиса Кати.');
+      return;
+    }
+    if (!trimmedSession && !hasSavedSession) {
       setStatusText('Укажите callrec_session.');
       return;
     }
 
-    setStatusText('Сохраняю сессию Кати...');
+    setStatusText('Сохраняю настройки Кати...');
     try {
-      await api.saveKatyaSession({ sessionCookie: trimmedSession });
+      await api.saveKatyaSettings({
+        baseUrl: trimmedBaseUrl,
+        sessionCookie: trimmedSession || undefined
+      });
+      const savedBaseUrl = await api.getKatyaBaseUrl();
+      setBaseUrl(savedBaseUrl);
       setSessionCookie('');
       setHasSavedSession(true);
       onConfiguredChange?.(true);
-      setStatusText('Сессия Кати сохранена.');
+      setStatusText('Настройки Кати сохранены.');
     } catch (error) {
-      setStatusText(error instanceof Error ? error.message : 'Не удалось сохранить сессию Кати.');
+      setStatusText(error instanceof Error ? error.message : 'Не удалось сохранить настройки Кати.');
     }
   }
 
@@ -873,6 +885,14 @@ export function KatyaPanel({
         транскрипций и протоколов. Группа доступа указывается отдельно при приглашении Кати в конкретный созвон.
       </p>
       <div className="form-grid">
+        <label className="wide">
+          <span>URL сервиса Кати</span>
+          <input
+            value={baseUrl}
+            onChange={(event) => setBaseUrl(event.target.value)}
+            placeholder={katyaDefaultBaseUrl}
+          />
+        </label>
         <label className="wide">
           <span>callrec_session</span>
           <input
@@ -887,11 +907,11 @@ export function KatyaPanel({
       <div className="actions">
         <button
           className="primary-action"
-          disabled={busy || !sessionCookie.trim()}
+          disabled={busy || !baseUrl.trim() || (!sessionCookie.trim() && !hasSavedSession)}
           onClick={saveSession}
           type="button"
         >
-          Сохранить сессию
+          Сохранить настройки
         </button>
         {hasSavedSession && <span className="selection-summary">Сессия сохранена</span>}
       </div>

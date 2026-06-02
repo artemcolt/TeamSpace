@@ -72,8 +72,12 @@ interface TeamSpaceBridge {
     resetChatGptSession: () => Promise<BrowserViewState>;
     openTelemost: (url: string) => Promise<void>;
     getKatyaMe: (payload: { baseUrl: string; sessionCookie: string }) => Promise<KatyaUser>;
+    getKatyaBaseUrl: () => Promise<string>;
+    saveKatyaBaseUrl: (payload: { baseUrl: string }) => Promise<void>;
+    saveKatyaSettings: (payload: { baseUrl: string; sessionCookie?: string }) => Promise<void>;
     getKatyaSession: () => Promise<string>;
     saveKatyaSession: (payload: { sessionCookie: string }) => Promise<void>;
+    listKatyaGroups: (payload: { baseUrl: string; sessionCookie: string }) => Promise<KatyaAccessGroup[]>;
     createKatyaMeeting: (payload: {
       baseUrl: string;
       sessionCookie: string;
@@ -212,6 +216,11 @@ interface KatyaMeeting {
   title: string;
   status: string;
   group_id?: string;
+}
+
+interface KatyaAccessGroup {
+  id: string;
+  name: string;
 }
 
 interface KatyaMeetingSegment {

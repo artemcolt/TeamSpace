@@ -10,7 +10,7 @@ import {
 } from 'react';
 import { ImageLightbox } from '../../components/common';
 import { api } from '../../domain/bridge';
-import { katyaAccessGroupStorageKey, katyaDefaultBaseUrl } from '../../domain/constants';
+import { katyaAccessGroupStorageKey } from '../../domain/constants';
 import { formatChatTime, formatDate, initials } from '../../domain/formatters';
 
 const katyaMeetingStoragePrefix = 'team-space:katya-meeting-id:';
@@ -655,6 +655,7 @@ export function Inbox({
     setTelemostStatusText('');
     try {
       const sessionCookie = await api.getKatyaSession();
+      const katyaBaseUrl = await api.getKatyaBaseUrl();
       const accessGroupId = window.localStorage.getItem(katyaAccessGroupStorageKey)?.trim() ?? '';
       if (!sessionCookie.trim()) {
         setTelemostStatusText('Нет сохраненной сессии Кати.');
@@ -666,7 +667,7 @@ export function Inbox({
       }
 
       const meeting = await api.createKatyaMeeting({
-        baseUrl: katyaDefaultBaseUrl,
+        baseUrl: katyaBaseUrl,
         sessionCookie,
         url,
         title: dailyMeetingTitle(),
@@ -686,6 +687,7 @@ export function Inbox({
     setTelemostStatusText('');
     try {
       const sessionCookie = await api.getKatyaSession();
+      const katyaBaseUrl = await api.getKatyaBaseUrl();
       const meetingId = window.localStorage.getItem(katyaMeetingStorageKey(url)) ?? '';
       if (!sessionCookie.trim() || !meetingId) {
         setTelemostStatusText('Нет активной Кати для удаления.');
@@ -693,7 +695,7 @@ export function Inbox({
       }
 
       await api.stopKatyaMeeting({
-        baseUrl: katyaDefaultBaseUrl,
+        baseUrl: katyaBaseUrl,
         sessionCookie,
         meetingId
       });
