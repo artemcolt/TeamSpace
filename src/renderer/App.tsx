@@ -240,10 +240,8 @@ export function App() {
     const chat = telegram.chats.find((item) => item.id === chatId);
     const topic = topicId ? telegram.topics.find((item) => item.id === topicId) : undefined;
     return [
-      chat?.lastMessageAt ?? '',
-      chat?.unreadCount ?? 0,
-      topic?.lastMessageAt ?? '',
-      topic?.unreadCount ?? 0
+      chat ? chat.id : '',
+      topicId ? topic?.id ?? '' : ''
     ].join('|');
   }
 

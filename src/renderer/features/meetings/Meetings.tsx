@@ -124,10 +124,6 @@ function writeSavedTelemostLinks(links: SavedTelemostLink[]): void {
   window.localStorage.setItem(savedTelemostLinksStorageKey, JSON.stringify(links));
 }
 
-function dailyTitle(): string {
-  return `Дэйлик ${new Intl.DateTimeFormat('ru-RU').format(new Date())}`;
-}
-
 function formatDateTime(value?: string): string {
   if (!value) {
     return 'Дата не указана';
@@ -380,6 +376,7 @@ function katyaErrorMessage(error: unknown, fallback: string): string {
 export function Meetings({ onOpenSettings }: { onOpenSettings: () => void }) {
   const [mode, setMode] = useState<MeetingsMode>('call');
   const [address, setAddress] = useState(defaultTelemostUrl);
+  const [meetingTitle, setMeetingTitle] = useState('Созвон');
   const [katyaBaseUrl, setKatyaBaseUrl] = useState(katyaDefaultBaseUrl);
   const [katyaSessionCookie, setKatyaSessionCookie] = useState('');
   const [katyaMeetingId, setKatyaMeetingId] = useState(() =>
@@ -503,7 +500,7 @@ export function Meetings({ onOpenSettings }: { onOpenSettings: () => void }) {
     const existing = savedTelemostLinks.find((link) => link.url === nextUrl);
     const nextItem: SavedTelemostLink = {
       url: nextUrl,
-      title: updates.title?.trim() || existing?.title || `Созвон ${formatListDate(new Date().toISOString())}`,
+      title: updates.title?.trim() || existing?.title || 'Созвон',
       createdAt: existing?.createdAt ?? new Date().toISOString(),
       katyaMeetingId: updates.katyaMeetingId ?? existing?.katyaMeetingId,
       accessGroupId: updates.accessGroupId ?? existing?.accessGroupId
@@ -521,6 +518,7 @@ export function Meetings({ onOpenSettings }: { onOpenSettings: () => void }) {
     const nextUrl = normalizeTelemostUrl(address);
     setAddress(nextUrl);
     const savedLink = upsertSavedTelemostLink(nextUrl, {
+      title: meetingTitle.trim() || 'Созвон',
       accessGroupId: accessGroupId.trim() || undefined
     });
     if (!savedLink) {
@@ -532,6 +530,7 @@ export function Meetings({ onOpenSettings }: { onOpenSettings: () => void }) {
 
   function selectSavedTelemostLink(link: SavedTelemostLink) {
     setAddress(link.url);
+    setMeetingTitle(link.title || 'Созвон');
     setKatyaMeetingId(link.katyaMeetingId ?? '');
     if (link.katyaMeetingId) {
       window.localStorage.setItem(katyaMeetingStorageKey, link.katyaMeetingId);
@@ -585,8 +584,9 @@ export function Meetings({ onOpenSettings }: { onOpenSettings: () => void }) {
   async function inviteKatya() {
     const nextUrl = normalizeTelemostUrl(address);
     const trimmedAccessGroupId = accessGroupId.trim();
-    const title = dailyTitle();
+    const title = meetingTitle.trim() || 'Созвон';
     setAddress(nextUrl);
+    setMeetingTitle(title);
 
     if (!isTelemostUrl(nextUrl)) {
       setStatusText('Укажите ссылку telemost.yandex.ru.');
@@ -967,6 +967,15 @@ export function Meetings({ onOpenSettings }: { onOpenSettings: () => void }) {
       {mode === 'call' ? (
         <section className="panel simple-meeting-panel">
           <label className="simple-meeting-address">
+            <span>Название созвона</span>
+            <input
+              value={meetingTitle}
+              onChange={(event) => setMeetingTitle(event.target.value)}
+              placeholder="Созвон"
+            />
+          </label>
+
+          <label className="simple-meeting-address">
             <span>Ссылка Телемоста</span>
             <input
               value={address}
@@ -1053,7 +1062,6 @@ export function Meetings({ onOpenSettings }: { onOpenSettings: () => void }) {
                         <strong>{link.title}</strong>
                         <small>{link.url}</small>
                       </span>
-                      <time>{formatListDate(link.createdAt)}</time>
                     </button>
                     <button
                       aria-label={`Удалить встречу ${link.title}`}

@@ -6,9 +6,9 @@ import { registerIpcHandlers } from './ipc/registerIpcHandlers';
 import { GitLabService } from './gitlab/gitlabService';
 import { RedmineService } from './redmine/redmineService';
 import { store } from './storage/localStore';
-import { TelegramService, type TelegramNewMessageEvent } from './telegram/telegramService';
+import { TelegramService } from './telegram/telegramService';
 import { telegramUnreadNotificationCount } from './domain/appState';
-import type { AppState } from './domain/types';
+import type { AppState, TelegramChat, TelegramMessage } from './domain/types';
 
 const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
 const MAIL_DEFAULT_URL = 'https://mail.example.com/';
@@ -113,6 +113,7 @@ let mailError = '';
 let browserError = '';
 let chatGptError = '';
 let mailCookiesConfigured = false;
+let lastUnreadNotificationState: AppState | null = null;
 
 function mailSession(): Electron.Session {
   return session.fromPartition('persist:gts-mail');
@@ -963,6 +964,7 @@ function createMainWindow(): void {
   const icon = appIconPath();
   if (process.platform === 'darwin' && app.dock) {
     app.dock.setIcon(icon);
+    updateAppBadge(store.getState());
   }
 
   const window = new BrowserWindow({
@@ -1011,7 +1013,8 @@ function createMainWindow(): void {
   window.loadFile(path.join(__dirname, '../dist/renderer/index.html'));
 }
 
-function sendStateChanged(state: unknown): void {
+function sendStateChanged(state: AppState): void {
+  updateAppBadge(state);
   for (const window of BrowserWindow.getAllWindows()) {
     window.webContents.send('app:state-changed', state);
   }
@@ -1021,12 +1024,10 @@ function updateAppBadge(state: AppState): void {
   const unreadCount = telegramUnreadNotificationCount(state.telegram);
 
   try {
+    app.setBadgeCount(unreadCount);
     if (process.platform === 'darwin' && app.dock) {
       app.dock.setBadge(unreadCount > 0 ? String(unreadCount) : '');
-      return;
     }
-
-    app.setBadgeCount(unreadCount);
   } catch (error) {
     console.warn('Failed to update app badge:', error);
   }
@@ -1050,26 +1051,86 @@ function truncateNotificationText(value: string): string {
   return normalized.length > 180 ? `${normalized.slice(0, 177)}...` : normalized;
 }
 
-function showTelegramNotification(event: TelegramNewMessageEvent): void {
+function showNativeNotification(title: string, body: string): void {
   if (!Notification.isSupported()) {
     return;
   }
 
-  const title = event.chat.type === 'private'
-    ? event.message.senderName
-    : `${event.chat.title}: ${event.message.senderName}`;
   const notification = new Notification({
     title,
-    body: truncateNotificationText(event.message.text || ((event.message.attachments?.length ?? 0) > 0 ? 'Вложение' : ''))
+    body: truncateNotificationText(body)
   });
   notification.on('click', focusMainWindow);
   notification.show();
 }
 
+function telegramNotificationTitle(chat: TelegramChat, message: TelegramMessage | null): string {
+  if (!message) {
+    return chat.title;
+  }
+  return chat.type === 'private'
+    ? message.senderName
+    : `${chat.title}: ${message.senderName}`;
+}
+
+function telegramNotificationBody(message: TelegramMessage | null, unreadIncrease: number): string {
+  if (message?.text.trim()) {
+    return message.text;
+  }
+  if ((message?.attachments?.length ?? 0) > 0) {
+    return 'Вложение';
+  }
+  return unreadIncrease === 1 ? 'Новое сообщение' : `${unreadIncrease} новых сообщений`;
+}
+
+function newestNewChatMessage(
+  previousState: AppState,
+  nextState: AppState,
+  chatId: string
+): TelegramMessage | null {
+  const previousMessageIds = new Set(previousState.telegram.messages.map((message) => message.id));
+  return nextState.telegram.messages
+    .filter((message) => message.chatId === chatId && !previousMessageIds.has(message.id))
+    .sort((a, b) => new Date(b.sentAt).getTime() - new Date(a.sentAt).getTime())[0] ?? null;
+}
+
+function showTelegramUnreadIncreaseNotifications(previousState: AppState | null, nextState: AppState): void {
+  if (!previousState) {
+    return;
+  }
+
+  const previousChats = new Map(previousState.telegram.chats.map((chat) => [chat.id, chat]));
+  for (const chat of nextState.telegram.chats) {
+    if (!chat.selected || chat.notificationsEnabled === false) {
+      continue;
+    }
+
+    const previousUnreadCount = Math.max(0, previousChats.get(chat.id)?.unreadCount ?? 0);
+    const nextUnreadCount = Math.max(0, chat.unreadCount ?? 0);
+    if (nextUnreadCount <= previousUnreadCount) {
+      continue;
+    }
+
+    const unreadIncrease = nextUnreadCount - previousUnreadCount;
+    const message = newestNewChatMessage(previousState, nextState, chat.id);
+    showNativeNotification(
+      telegramNotificationTitle(chat, message),
+      telegramNotificationBody(message, unreadIncrease)
+    );
+  }
+}
+
+function handleAppStateChanged(state: AppState): void {
+  updateAppBadge(state);
+  showTelegramUnreadIncreaseNotifications(lastUnreadNotificationState, state);
+  lastUnreadNotificationState = state;
+}
+
 app.whenReady().then(async () => {
   await store.initialize();
-  store.onStateChanged(updateAppBadge);
-  updateAppBadge(store.getState());
+  lastUnreadNotificationState = store.getState();
+  store.onStateChanged(handleAppStateChanged);
+  updateAppBadge(lastUnreadNotificationState);
   configureDisplayMedia();
   configureLocalFileProtocol();
   registerMailViewIpc();
@@ -1077,8 +1138,7 @@ app.whenReady().then(async () => {
   registerChatGptViewIpc();
 
   const telegram = new TelegramService(store, {
-    onStateChanged: sendStateChanged,
-    onNewMessage: showTelegramNotification
+    onStateChanged: sendStateChanged
   });
   const redmine = new RedmineService(store);
   const gitlab = new GitLabService(store);

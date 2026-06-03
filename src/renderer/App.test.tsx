@@ -123,7 +123,7 @@ function installBridge(initialState: AppState) {
   const api = {
     getState: vi.fn(async () => state),
     deleteLocalData: vi.fn(async () => state),
-    onStateChanged: vi.fn(() => () => undefined),
+    onStateChanged: vi.fn((_listener: (state: AppState) => void) => () => undefined),
     onMailStateChanged: vi.fn(() => () => undefined),
     onBrowserStateChanged: vi.fn(() => () => undefined),
     onChatGptStateChanged: vi.fn(() => () => undefined),
@@ -979,6 +979,50 @@ describe('App', () => {
         topicId: undefined
       })
     );
+  });
+
+  it('does not mark the selected Telegram chat as read when a realtime update changes unread count', async () => {
+    const state = connectedState();
+    state.telegram.chats[0].unreadCount = 0;
+    const api = installBridge(state);
+    render(<App />);
+
+    await waitFor(() =>
+      expect(api.loadChatMessages).toHaveBeenCalledWith({
+        chatId: 'chat_1',
+        topicId: undefined
+      })
+    );
+    api.loadChatMessages.mockClear();
+
+    const realtimeState = connectedState();
+    realtimeState.telegram.chats[0] = {
+      ...realtimeState.telegram.chats[0],
+      unreadCount: 1,
+      lastMessageAt: '2026-05-27T10:01:00.000Z'
+    };
+    realtimeState.telegram.messages = [
+      ...realtimeState.telegram.messages,
+      {
+        id: 'chat_1:11',
+        chatId: 'chat_1',
+        topicId: null,
+        senderId: 'user_2',
+        senderName: 'Борис',
+        senderAvatar: null,
+        sentAt: '2026-05-27T10:01:00.000Z',
+        text: 'Новое входящее сообщение.',
+        status: 'new',
+        createdAt: '2026-05-27T10:01:00.000Z',
+        updatedAt: '2026-05-27T10:01:00.000Z'
+      }
+    ];
+    const onStateChanged = api.onStateChanged.mock.calls[0]?.[0] as ((state: AppState) => void) | undefined;
+    onStateChanged?.(realtimeState);
+
+    expect(await screen.findByText('Новое входящее сообщение.')).toBeInTheDocument();
+    expect(screen.getByText('1', { selector: '.unread-badge' })).toBeInTheDocument();
+    expect(api.loadChatMessages).not.toHaveBeenCalled();
   });
 
   it('shows AI queue as a separate tab and opens a queued task target', async () => {
@@ -2025,6 +2069,7 @@ describe('App', () => {
         baseUrl: 'http://localhost:8077',
         groupId: 'group-access-2',
         sessionCookie: 'test-session',
+        title: 'Созвон',
         url: 'https://telemost.yandex.ru/j/00000000000000'
       }))
     );
@@ -2037,11 +2082,14 @@ describe('App', () => {
     render(<App />);
 
     await user.click(await screen.findByRole('button', { name: 'Встречи' }));
+    await user.clear(screen.getByLabelText('Название созвона'));
+    await user.type(screen.getByLabelText('Название созвона'), 'Планирование релиза');
     const telemostInput = screen.getByLabelText('Ссылка Телемоста');
     await user.clear(telemostInput);
     await user.type(telemostInput, 'https://telemost.yandex.ru/j/12345678901234');
     await user.click(screen.getByRole('button', { name: 'Сохранить встречу' }));
 
+    await screen.findByText('Планирование релиза');
     await screen.findByText('https://telemost.yandex.ru/j/12345678901234');
     expect(screen.getByText('Ссылка на встречу сохранена.')).toBeInTheDocument();
 

@@ -1,0 +1,14 @@
+{
+  "title": "Swagger-группа CRUD справочников",
+  "summary": "CRUD-ручки справочников вынесены в отдельную группу Swagger. В основной группе оставлены не-CRUD API, включая проверки доступности транспорта и водителей.",
+  "createdAt": "2026-06-02T16:22:04+03:00",
+  "redmine": {
+    "projectId": "",
+    "trackerId": "",
+    "priorityId": "",
+    "assigneeId": "",
+    "issueId": "16005",
+    "url": "https://plan.gt-sot.ru/issues/16005",
+    "createdAt": "2026-06-02T13:42:44.833Z"
+  }
+}
