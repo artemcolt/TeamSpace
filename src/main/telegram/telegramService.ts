@@ -2249,7 +2249,7 @@ export class TelegramService {
     const dialogsByChatId = new Map(dialogs.map((dialog) => [String(dialog.id), dialog]));
     const existingChatsById = new Map(existingState.chats.map((chat) => [chat.id, chat]));
     const avatarCache = new Map<string, string | null>();
-    const chats: TelegramChat[] = await Promise.all(dialogs.map(async (dialog) => {
+    const loadedChats: TelegramChat[] = await Promise.all(dialogs.map(async (dialog) => {
       const id = String(dialog.id);
       const previous = existingChatsById.get(id);
       const unreadCount = Number.isFinite(dialog.unreadCount) ? dialog.unreadCount : previous?.unreadCount ?? 0;
@@ -2269,9 +2269,12 @@ export class TelegramService {
         unreadCount
       };
     }));
+    const loadedChatIds = new Set(loadedChats.map((chat) => chat.id));
+    const preservedSelectedChats = existingState.chats.filter((chat) => chat.selected && !loadedChatIds.has(chat.id));
+    const chats = [...loadedChats, ...preservedSelectedChats];
 
     const loadedTopics: TelegramTopic[] = [];
-    for (const chat of chats.filter((chat) => chat.hasTopics)) {
+    for (const chat of loadedChats.filter((chat) => chat.hasTopics)) {
       const dialog = dialogs.find((item) => String(item.id) === chat.id);
       if (!dialog?.entity) {
         continue;
@@ -2283,7 +2286,7 @@ export class TelegramService {
         loadedTopics.push(...existingState.topics.filter((topic) => topic.chatId === chat.id));
       }
     }
-    const topicChatIdsWithTopics = new Set(chats.filter((chat) => chat.hasTopics).map((chat) => chat.id));
+    const topicChatIdsWithTopics = new Set(loadedChats.filter((chat) => chat.hasTopics).map((chat) => chat.id));
     const topics = [
       ...loadedTopics,
       ...existingState.topics.filter((topic) => !topicChatIdsWithTopics.has(topic.chatId))
