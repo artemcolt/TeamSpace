@@ -15,6 +15,8 @@ function createStore(initialState: AppState = defaultState()) {
   return {
     getState: vi.fn(() => structuredClone(state)),
     getSecret: vi.fn(() => null),
+    getTelegramAvatar: vi.fn(() => null),
+    saveTelegramAvatar: vi.fn(),
     setState: vi.fn((updater: (draft: AppState) => void) => {
       updater(state);
       return structuredClone(state);
@@ -46,6 +48,71 @@ describe('TelegramService stored credentials', () => {
       hasApiCredentials: false,
       error: 'Telegram api_id/api_hash не настроены. Заполните TELEGRAM_API_ID и TELEGRAM_API_HASH в .env.'
     });
+  });
+});
+
+describe('TelegramService workspace sync', () => {
+  it('keeps selected cached chats when Telegram does not return them in the dialog batch', async () => {
+    const state = defaultState();
+    state.telegram.chats = [
+      {
+        id: 'cached_chat',
+        title: 'Cached Team Chat',
+        type: 'group',
+        avatar: null,
+        hasTopics: true,
+        selected: true,
+        notificationsEnabled: true,
+        lastSyncedAt: '2026-06-01T10:00:00.000Z',
+        lastMessageAt: '2026-06-01T10:00:00.000Z',
+        unreadCount: 4
+      },
+      {
+        id: 'unselected_cached_chat',
+        title: 'Unselected Chat',
+        type: 'group',
+        avatar: null,
+        hasTopics: false,
+        selected: false,
+        notificationsEnabled: true,
+        lastSyncedAt: '2026-06-01T09:00:00.000Z',
+        lastMessageAt: '2026-06-01T09:00:00.000Z',
+        unreadCount: 0
+      }
+    ];
+    state.telegram.topics = [
+      {
+        id: 'cached_chat:topic:1',
+        chatId: 'cached_chat',
+        title: 'Support',
+        topMessageId: '1',
+        unreadCount: 1,
+        lastMessageAt: '2026-06-01T10:00:00.000Z'
+      }
+    ];
+    const store = createStore(state);
+    const service = new TelegramService(store);
+    const loadWorkspace = Reflect.get(service, 'loadWorkspace') as (
+      client: { getDialogs: () => Promise<unknown[]>; invoke: () => Promise<unknown> },
+      existingState: AppState['telegram']
+    ) => Promise<Pick<AppState['telegram'], 'chats' | 'topics'>>;
+
+    const workspace = await loadWorkspace.call(
+      service,
+      {
+        getDialogs: vi.fn(async () => []),
+        invoke: vi.fn(async () => ({ filters: [] }))
+      },
+      state.telegram
+    );
+
+    expect(workspace.chats.map((chat) => chat.id)).toEqual(['cached_chat']);
+    expect(workspace.chats[0]).toMatchObject({
+      selected: true,
+      title: 'Cached Team Chat',
+      unreadCount: 4
+    });
+    expect(workspace.topics.map((topic) => topic.id)).toEqual(['cached_chat:topic:1']);
   });
 });
 
