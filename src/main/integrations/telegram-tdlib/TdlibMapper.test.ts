@@ -166,6 +166,21 @@ describe('TdlibMapper', () => {
     }, { senderName: 'Dasha', topicId: null, status: 'new' })).toBeNull();
   });
 
+  it('returns null for unsupported media with captions', () => {
+    expect(tdlibMessageToView({
+      '@type': 'message',
+      id: 82,
+      chat_id: 42,
+      date: 1780638000,
+      is_outgoing: false,
+      sender_id: { '@type': 'messageSenderUser', user_id: 9 },
+      content: {
+        '@type': 'messageAudio',
+        caption: { text: 'voice note' }
+      }
+    }, { senderName: 'Dasha', topicId: null, status: 'new' })).toBeNull();
+  });
+
   it('returns null for malformed message dates and chat last message dates', () => {
     expect(tdlibMessageToView({
       '@type': 'message',

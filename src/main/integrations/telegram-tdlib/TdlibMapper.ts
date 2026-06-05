@@ -30,9 +30,20 @@ function chatType(type: unknown): TelegramChat['type'] {
   return 'group';
 }
 
+function isSupportedContentType(type: string | undefined): boolean {
+  return type === 'messageText' ||
+    type === 'messageDocument' ||
+    type === 'messagePhoto' ||
+    type === 'messageSticker' ||
+    type === 'messageVideo';
+}
+
 function textFromContent(content: unknown): string {
   const object = content as { '@type'?: string; text?: { text?: string }; caption?: { text?: string } } | undefined;
-  return object?.text?.text ?? object?.caption?.text ?? '';
+  if (object?.['@type'] === 'messageText') {
+    return object.text?.text ?? '';
+  }
+  return object?.caption?.text ?? '';
 }
 
 function attachmentsFromContent(messageId: string, content: unknown): TelegramMessageAttachment[] {
@@ -136,6 +147,9 @@ export function tdlibMessageToView(
     return null;
   }
   const content = message.content;
+  if (!isSupportedContentType(contentType(content))) {
+    return null;
+  }
   const text = textFromContent(content);
   const attachments = attachmentsFromContent(messageId, content);
   if (!text && attachments.length === 0 && !isKnownEmptyContent(content)) {
