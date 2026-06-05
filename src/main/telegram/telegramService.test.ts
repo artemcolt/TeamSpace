@@ -15,6 +15,8 @@ function createStore(initialState: AppState = defaultState()) {
   return {
     getState: vi.fn(() => structuredClone(state)),
     getSecret: vi.fn(() => null),
+    setSecret: vi.fn(),
+    deleteSecret: vi.fn(),
     getTelegramAvatar: vi.fn(() => null),
     saveTelegramAvatar: vi.fn(),
     setState: vi.fn((updater: (draft: AppState) => void) => {
@@ -22,6 +24,39 @@ function createStore(initialState: AppState = defaultState()) {
       return structuredClone(state);
     })
   } as unknown as LocalStore;
+}
+
+function telegramMessage(overrides: Partial<AppState['telegram']['messages'][number]>): AppState['telegram']['messages'][number] {
+  return {
+    id: 'chat_1:1',
+    chatId: 'chat_1',
+    topicId: null,
+    senderId: null,
+    senderName: 'Sender',
+    senderAvatar: null,
+    sentAt: '2026-06-01T10:00:00.000Z',
+    text: 'Message',
+    status: 'new',
+    createdAt: '2026-06-01T10:00:00.000Z',
+    updatedAt: '2026-06-01T10:00:00.000Z',
+    ...overrides
+  };
+}
+
+function installReadPathStubs(service: TelegramService, store: LocalStore) {
+  const client = {
+    markAsRead: vi.fn(async () => undefined),
+    session: { save: vi.fn(() => '') }
+  };
+  vi.spyOn(service as unknown as { getStoredClient: () => Promise<typeof client> }, 'getStoredClient')
+    .mockResolvedValue(client);
+  vi.spyOn(service as unknown as { findDialog: () => Promise<{ entity: object }> }, 'findDialog')
+    .mockResolvedValue({ entity: {} });
+  vi.spyOn(service as unknown as {
+    loadMessagesForDialog: () => Promise<AppState['telegram']['messages']>;
+  }, 'loadMessagesForDialog')
+    .mockImplementation(async () => store.getState().telegram.messages);
+  return client;
 }
 
 describe('TelegramService stored credentials', () => {
@@ -113,6 +148,117 @@ describe('TelegramService workspace sync', () => {
         notifyingUnreadCount: 3
       }
     });
+  });
+
+  it('loads a focused thread without clearing unread counts', async () => {
+    const state = defaultState();
+    state.telegram.chats = [
+      {
+        id: 'chat_1',
+        title: 'Team Chat',
+        type: 'group',
+        avatar: null,
+        hasTopics: false,
+        selected: true,
+        notificationsEnabled: true,
+        lastSyncedAt: null,
+        lastMessageAt: '2026-06-01T10:00:00.000Z',
+        unreadCount: 3
+      }
+    ];
+    state.telegram.messages = [
+      telegramMessage({ id: 'chat_1:1', sentAt: '2026-06-01T10:00:00.000Z' })
+    ];
+    const store = createStore(state);
+    const service = new TelegramService(store);
+    const client = installReadPathStubs(service, store);
+
+    await expect(service.getThread({ chatId: 'chat_1', topicId: null })).resolves.toMatchObject({
+      key: { chatId: 'chat_1', topicId: null },
+      messages: [{ id: 'chat_1:1' }]
+    });
+
+    expect(client.markAsRead).not.toHaveBeenCalled();
+    expect(store.getState().telegram.chats[0]?.unreadCount).toBe(3);
+  });
+
+  it('marks a topic thread read without clearing sibling topic or chat remainder', async () => {
+    const state = defaultState();
+    state.telegram.chats = [
+      {
+        id: 'chat_1',
+        title: 'Team Chat',
+        type: 'group',
+        avatar: null,
+        hasTopics: true,
+        selected: true,
+        notificationsEnabled: true,
+        lastSyncedAt: null,
+        lastMessageAt: '2026-06-01T10:00:00.000Z',
+        unreadCount: 7
+      }
+    ];
+    state.telegram.topics = [
+      {
+        id: 'chat_1:topic:1',
+        chatId: 'chat_1',
+        title: 'Support',
+        topMessageId: '1',
+        unreadCount: 3,
+        lastMessageAt: '2026-06-01T10:00:00.000Z'
+      },
+      {
+        id: 'chat_1:topic:2',
+        chatId: 'chat_1',
+        title: 'Deploys',
+        topMessageId: '2',
+        unreadCount: 4,
+        lastMessageAt: '2026-06-01T10:30:00.000Z'
+      }
+    ];
+    const store = createStore(state);
+    const service = new TelegramService(store);
+    const client = installReadPathStubs(service, store);
+
+    await service.markThreadRead({ chatId: 'chat_1', topicId: 'chat_1:topic:1' });
+
+    const telegram = store.getState().telegram;
+    expect(client.markAsRead).not.toHaveBeenCalled();
+    expect(telegram.chats[0]?.unreadCount).toBe(4);
+    expect(telegram.topics.find((topic) => topic.id === 'chat_1:topic:1')?.unreadCount).toBe(0);
+    expect(telegram.topics.find((topic) => topic.id === 'chat_1:topic:2')?.unreadCount).toBe(4);
+  });
+
+  it('returns the newest limited thread messages in chronological order with hasOlder', async () => {
+    const state = defaultState();
+    state.telegram.chats = [
+      {
+        id: 'chat_1',
+        title: 'Team Chat',
+        type: 'group',
+        avatar: null,
+        hasTopics: false,
+        selected: true,
+        notificationsEnabled: true,
+        lastSyncedAt: null,
+        lastMessageAt: '2026-06-01T10:03:00.000Z',
+        unreadCount: 0
+      }
+    ];
+    state.telegram.messages = [
+      telegramMessage({ id: 'chat_1:1', sentAt: '2026-06-01T10:00:00.000Z', text: 'First' }),
+      telegramMessage({ id: 'chat_1:2', sentAt: '2026-06-01T10:01:00.000Z', text: 'Second' }),
+      telegramMessage({ id: 'chat_1:3', sentAt: '2026-06-01T10:02:00.000Z', text: 'Third' }),
+      telegramMessage({ id: 'chat_1:4', sentAt: '2026-06-01T10:03:00.000Z', text: 'Fourth' })
+    ];
+    const store = createStore(state);
+    const service = new TelegramService(store);
+    installReadPathStubs(service, store);
+
+    const thread = await service.getThread({ chatId: 'chat_1', topicId: null, limit: 2 });
+
+    expect(thread.messages.map((message) => message.id)).toEqual(['chat_1:3', 'chat_1:4']);
+    expect(thread.hasOlder).toBe(true);
   });
 
   it('keeps selected cached chats when Telegram does not return them in the dialog batch', async () => {

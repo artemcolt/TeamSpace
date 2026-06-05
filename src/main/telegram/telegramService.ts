@@ -315,25 +315,64 @@ export class TelegramService {
   }
 
   async getThread(payload: TelegramThreadRequest): Promise<TelegramThreadView> {
-    const state = await this.loadChatMessages({ chatId: payload.chatId, topicId: payload.topicId ?? undefined });
+    const state = await this.loadChatMessagesForCache({
+      chatId: payload.chatId,
+      topicId: payload.topicId ?? undefined
+    }, {
+      markChatRead: false,
+      clearUnread: false
+    });
+    const limit = Math.max(1, Math.trunc(payload.limit ?? 50));
     const messages = state.telegram.messages
       .filter((message) => message.chatId === payload.chatId)
-      .filter((message) => !payload.topicId || message.topicId === payload.topicId)
+      .filter((message) => payload.topicId === null || message.topicId === payload.topicId)
       .sort((a, b) => new Date(a.sentAt).getTime() - new Date(b.sentAt).getTime());
+    const limitedMessages = messages.slice(-limit);
     return {
       key: { chatId: payload.chatId, topicId: payload.topicId },
-      messages,
-      hasOlder: messages.length >= (payload.limit ?? 50),
+      messages: limitedMessages,
+      hasOlder: messages.length > limitedMessages.length,
       loading: false
     };
   }
 
   async markThreadRead(payload: TelegramThreadKey): Promise<TelegramInboxSnapshot> {
-    await this.loadChatMessages({ chatId: payload.chatId, topicId: payload.topicId ?? undefined });
+    if (payload.topicId === null) {
+      await this.loadChatMessages({ chatId: payload.chatId });
+      return this.getInboxSnapshot();
+    }
+
+    const topicUnreadCount = this.store.getState().telegram.topics.find((topic) =>
+      topic.chatId === payload.chatId && topic.id === payload.topicId
+    )?.unreadCount ?? 0;
+    const unreadToClear = Math.max(0, topicUnreadCount);
+    // TDLib will replace this local approximation with real topic-aware read behavior.
+    this.store.setState((state) => {
+      state.telegram.topics = state.telegram.topics.map((topic) =>
+        topic.chatId === payload.chatId && topic.id === payload.topicId
+          ? { ...topic, unreadCount: 0 }
+          : topic
+      );
+      state.telegram.chats = state.telegram.chats.map((chat) =>
+        chat.id === payload.chatId
+          ? { ...chat, unreadCount: Math.max(0, chat.unreadCount - unreadToClear) }
+          : chat
+      );
+    });
     return this.getInboxSnapshot();
   }
 
   async loadChatMessages(payload: { chatId: string; topicId?: string }): Promise<AppState> {
+    return this.loadChatMessagesForCache(payload, {
+      markChatRead: true,
+      clearUnread: true
+    });
+  }
+
+  private async loadChatMessagesForCache(
+    payload: { chatId: string; topicId?: string },
+    options: { markChatRead: boolean; clearUnread: boolean }
+  ): Promise<AppState> {
     const client = await this.getStoredClient();
     const { chatId } = payload;
     const dialog = await this.findDialog(client, chatId);
@@ -350,7 +389,9 @@ export class TelegramService {
       0,
       topic
     );
-    await withTimeout(client.markAsRead(dialog.entity), 20000, 'Telegram mark chat read');
+    if (options.markChatRead) {
+      await withTimeout(client.markAsRead(dialog.entity), 20000, 'Telegram mark chat read');
+    }
     this.store.setSecret('telegramSession', this.serializeSession(client));
     return this.store.setState((state) => {
       state.telegram.messages = this.mergeLoadedMessages(
@@ -364,7 +405,7 @@ export class TelegramService {
               ...chat,
               lastSyncedAt: now(),
               lastMessageAt: this.lastMessageAt(state.telegram.messages, chat.id),
-              unreadCount: 0
+              unreadCount: options.clearUnread ? 0 : chat.unreadCount
             }
           : chat
       );
@@ -373,7 +414,7 @@ export class TelegramService {
           item.id === topic.id
             ? {
                 ...item,
-                unreadCount: 0,
+                unreadCount: options.clearUnread ? 0 : item.unreadCount,
                 lastMessageAt: this.lastTopicMessageAt(state.telegram.messages, item.id)
               }
             : item
