@@ -1,4 +1,5 @@
 node_modules/
+.worktrees/
 build/dev/
 dist/
 dist-electron/
