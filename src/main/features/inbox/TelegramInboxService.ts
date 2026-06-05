@@ -1,4 +1,9 @@
-import type { TelegramInboxSnapshot, TelegramThreadRequest, TelegramThreadView } from '../../domain/types';
+import type {
+  TelegramInboxSnapshot,
+  TelegramThreadKey,
+  TelegramThreadRequest,
+  TelegramThreadView
+} from '../../domain/types';
 import type { TdlibClient } from '../../integrations/telegram-tdlib/TdlibClient';
 import { tdlibChatToSummary, tdlibMessageToView } from '../../integrations/telegram-tdlib/TdlibMapper';
 import type { TdlibObject } from '../../integrations/telegram-tdlib/tdlibTypes';
@@ -64,6 +69,17 @@ export class TelegramInboxService {
       hasOlder: response.total_count > response.messages.length,
       loading: false
     };
+  }
+
+  async markThreadRead(payload: TelegramThreadKey): Promise<TelegramInboxSnapshot> {
+    // First migration scope uses chat-level viewMessages; topic-aware TDLib read handling can be added later.
+    await this.client.send({
+      '@type': 'viewMessages',
+      chat_id: Number(payload.chatId),
+      message_ids: [],
+      force_read: true
+    });
+    return this.getInboxSnapshot();
   }
 
   private mergeChatIds(tdlibChatIds: Array<number | string>, selectedChatIds: string[]): Array<number | string> {

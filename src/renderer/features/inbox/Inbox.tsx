@@ -45,6 +45,7 @@ export function Inbox({
   createIssueFromMessages,
   openInternalBrowser,
   runAction,
+  markThreadRead,
   loadOlderThreadMessages
 }: {
   busy: boolean;
@@ -66,6 +67,7 @@ export function Inbox({
     success?: string,
     options?: { blockUi?: boolean; refreshTelegramThread?: boolean }
   ) => Promise<AppState | null>;
+  markThreadRead: (payload: TelegramThreadKey) => Promise<void>;
   loadOlderThreadMessages: (
     chatId: string,
     topicId: string | null,
@@ -90,6 +92,7 @@ export function Inbox({
   const [optimisticMessages, setOptimisticMessages] = useState<OptimisticMessage[]>([]);
   const [renderedMessageLimit, setRenderedMessageLimit] = useState(initialRenderedMessageLimit);
   const threadRef = useRef<HTMLDivElement | null>(null);
+  const markedReadThreadRef = useRef('');
   const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const topicTabsRef = useRef<HTMLDivElement | null>(null);
   const previousScrollHeight = useRef<number | null>(null);
@@ -175,6 +178,41 @@ export function Inbox({
     thread.scrollTop = thread.scrollHeight;
   }
 
+  function selectedThreadKey(): TelegramThreadKey | null {
+    if (!selectedChatId || !selectedChat) {
+      return null;
+    }
+
+    return {
+      chatId: selectedChatId,
+      topicId: selectedTopicId && selectedTopicId !== 'all' ? selectedTopicId : null
+    };
+  }
+
+  function isThreadAtBottom(thread: HTMLElement): boolean {
+    if (thread.scrollHeight === 0 || thread.clientHeight === 0) {
+      return false;
+    }
+
+    return thread.scrollHeight - thread.scrollTop - thread.clientHeight < 8;
+  }
+
+  function maybeMarkThreadRead() {
+    const thread = threadRef.current;
+    const key = selectedThreadKey();
+    if (!thread || !key || !newestMessageId || !document.hasFocus() || !isThreadAtBottom(thread)) {
+      return;
+    }
+
+    const marker = `${key.chatId}:${key.topicId ?? ''}:${newestMessageId}`;
+    if (markedReadThreadRef.current === marker) {
+      return;
+    }
+
+    markedReadThreadRef.current = marker;
+    void markThreadRead(key);
+  }
+
   function scheduleThreadScrollToBottom(frameCount = 2) {
     if (bottomScrollFrameRef.current !== null) {
       window.cancelAnimationFrame(bottomScrollFrameRef.current);
@@ -187,6 +225,7 @@ export function Inbox({
           scrollOnFrame(remainingFrames - 1);
           return;
         }
+        maybeMarkThreadRead();
         bottomScrollFrameRef.current = null;
       });
     };
@@ -215,6 +254,7 @@ export function Inbox({
     }
 
     thread.scrollTop = thread.scrollHeight;
+    window.requestAnimationFrame(maybeMarkThreadRead);
   }, [selectedChatId, selectedTopicId, newestMessageId, renderedMessages.length]);
 
   useEffect(() => {
@@ -1150,6 +1190,7 @@ export function Inbox({
               if (event.currentTarget.scrollTop <= 24) {
                 void loadOlderMessages();
               }
+              maybeMarkThreadRead();
             }}
           >
             {loadingOlder && <div className="history-loader">Загружаем старые сообщения...</div>}

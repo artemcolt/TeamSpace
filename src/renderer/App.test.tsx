@@ -128,6 +128,25 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
+function setThreadScrollMetrics(
+  thread: Element,
+  metrics: { scrollHeight: number; clientHeight: number; scrollTop: number }
+) {
+  Object.defineProperty(thread, 'scrollHeight', {
+    configurable: true,
+    value: metrics.scrollHeight
+  });
+  Object.defineProperty(thread, 'clientHeight', {
+    configurable: true,
+    value: metrics.clientHeight
+  });
+  Object.defineProperty(thread, 'scrollTop', {
+    configurable: true,
+    writable: true,
+    value: metrics.scrollTop
+  });
+}
+
 function installBridge(initialState: AppState) {
   let state = initialState;
   const telegramInboxSnapshot = (): TelegramInboxSnapshot => {
@@ -1037,6 +1056,68 @@ describe('App', () => {
         limit: 50
       })
     );
+  });
+
+  it('marks Telegram thread read only after the bottom is viewed', async () => {
+    const state = connectedState();
+    const api = installBridge(state);
+    const hasFocus = vi.spyOn(document, 'hasFocus').mockReturnValue(true);
+    const { container } = render(<App />);
+
+    try {
+      await waitFor(() =>
+        expect(api.getTelegramThread).toHaveBeenCalledWith({
+          chatId: 'chat_1',
+          topicId: null,
+          limit: 50
+        })
+      );
+      expect(api.markTelegramThreadRead).not.toHaveBeenCalled();
+
+      const thread = container.querySelector('.telegram-thread');
+      expect(thread).not.toBeNull();
+      setThreadScrollMetrics(thread as Element, {
+        scrollHeight: 1000,
+        clientHeight: 400,
+        scrollTop: 600
+      });
+      fireEvent.scroll(thread as Element);
+
+      await waitFor(() =>
+        expect(api.markTelegramThreadRead).toHaveBeenCalledWith({
+          chatId: 'chat_1',
+          topicId: null
+        })
+      );
+    } finally {
+      hasFocus.mockRestore();
+    }
+  });
+
+  it('does not repeatedly mark the same Telegram thread and newest message read', async () => {
+    const state = connectedState();
+    const api = installBridge(state);
+    const hasFocus = vi.spyOn(document, 'hasFocus').mockReturnValue(true);
+    const { container } = render(<App />);
+
+    try {
+      await waitFor(() => expect(api.getTelegramThread).toHaveBeenCalled());
+      const thread = container.querySelector('.telegram-thread');
+      expect(thread).not.toBeNull();
+      setThreadScrollMetrics(thread as Element, {
+        scrollHeight: 1000,
+        clientHeight: 400,
+        scrollTop: 600
+      });
+
+      fireEvent.scroll(thread as Element);
+      await waitFor(() => expect(api.markTelegramThreadRead).toHaveBeenCalledTimes(1));
+      fireEvent.scroll(thread as Element);
+
+      expect(api.markTelegramThreadRead).toHaveBeenCalledTimes(1);
+    } finally {
+      hasFocus.mockRestore();
+    }
   });
 
   it('shows Telegram messages from the focused thread response', async () => {

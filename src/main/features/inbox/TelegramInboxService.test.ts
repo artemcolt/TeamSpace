@@ -90,6 +90,21 @@ describe('TelegramInboxService', () => {
     expect(client.sentRequests().map((request) => request['@type'])).not.toContain('viewMessages');
   });
 
+  it('marks a thread read only when explicitly requested', async () => {
+    const client = new FakeTdlibClient();
+    client.replyTo('viewMessages', { '@type': 'ok' });
+    client.replyTo('getChats', { '@type': 'chats', chat_ids: [], total_count: 0 });
+    const service = new TelegramInboxService(client, new InMemoryTelegramInboxRepository());
+
+    await service.markThreadRead({ chatId: '42', topicId: null });
+
+    expect(client.sentRequests()[0]).toMatchObject({
+      '@type': 'viewMessages',
+      chat_id: 42,
+      force_read: true
+    });
+  });
+
   it('loads a topic thread with getMessageThreadHistory', async () => {
     const client = new FakeTdlibClient();
     client.replyTo('getMessageThreadHistory', {

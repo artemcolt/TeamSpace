@@ -321,6 +321,14 @@ export function App() {
     );
   }
 
+  async function markTelegramThreadRead(payload: TelegramThreadKey) {
+    try {
+      await api.markTelegramThreadRead(payload);
+    } catch (error) {
+      notify(error instanceof Error ? error.message : 'Не удалось отметить Telegram-чат прочитанным.', 'error');
+    }
+  }
+
   async function loadOlderThreadMessages(chatId: string, topicId: string | null, beforeMessageId: string) {
     if (!chatId || !beforeMessageId) {
       return null;
@@ -733,6 +741,7 @@ export function App() {
             createIssueFromMessages={createIssueFromSelectedMessages}
             openInternalBrowser={openInternalBrowser}
             runAction={runAction}
+            markThreadRead={markTelegramThreadRead}
             loadOlderThreadMessages={loadOlderThreadMessages}
           />
         )}
