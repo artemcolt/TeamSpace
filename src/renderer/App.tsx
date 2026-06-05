@@ -48,6 +48,11 @@ export function App() {
   const [selectedAiQueueItemId, setSelectedAiQueueItemId] = useState('');
   const [queueFileViewer, setQueueFileViewer] = useState<QueueFileViewer | null>(null);
   const activeChatLoadSignals = useRef(new Map<string, string>());
+  const telegramThreadRequestSequences = useRef(new Map<string, number>());
+  const selectedTelegramThreadRef = useRef<{ chatId: string; topicId: string | null }>({
+    chatId: '',
+    topicId: null
+  });
 
   useEffect(() => {
     Promise.all([api.getState(), api.getKatyaSession()]).then(([nextState, savedKatyaSession]) => {
@@ -69,6 +74,13 @@ export function App() {
   }, []);
 
   useEffect(() => api.onStateChanged(setState), []);
+
+  useEffect(() => {
+    selectedTelegramThreadRef.current = {
+      chatId: selectedChatId,
+      topicId: currentThreadTopicId(selectedTopicId)
+    };
+  }, [selectedChatId, selectedTopicId]);
 
   useEffect(() => {
     api.getAiQueue().then(setAiQueue).catch(() => undefined);
@@ -213,9 +225,39 @@ export function App() {
   function telegramChatLoadSignal(telegram: AppState['telegram'], chatId: string, topicId?: string | null) {
     const chat = telegram.chats.find((item) => item.id === chatId);
     const topic = topicId ? telegram.topics.find((item) => item.id === topicId) : undefined;
+    const scopedMessages = telegram.messages
+      .filter((message) => message.chatId === chatId)
+      .filter((message) => !topicId || message.topicId === topicId);
+    const newestMessage = scopedMessages.reduce<TelegramMessage | null>((newest, message) => {
+      if (!newest || new Date(message.sentAt).getTime() > new Date(newest.sentAt).getTime()) {
+        return message;
+      }
+      return newest;
+    }, null);
+    const newestUpdateTime = scopedMessages.reduce((newest, message) => {
+      const updateTime = new Date(message.updatedAt || message.sentAt).getTime();
+      return Number.isFinite(updateTime) && updateTime > newest ? updateTime : newest;
+    }, 0);
+    const scopedMessageRevision = scopedMessages
+      .map((message) => [
+        message.id,
+        message.updatedAt,
+        message.status,
+        message.text,
+        message.attachments?.length ?? 0,
+        message.reactions?.map((reaction) => `${reaction.emoticon}:${reaction.count}:${reaction.mine}`).join(',') ?? ''
+      ].join('~'))
+      .join('^');
     return [
       chat ? chat.id : '',
-      topicId ? topic?.id ?? '' : ''
+      topicId ? topic?.id ?? '' : '',
+      chat?.lastMessageAt ?? '',
+      topic?.lastMessageAt ?? '',
+      String(scopedMessages.length),
+      newestMessage?.id ?? '',
+      newestMessage?.sentAt ?? '',
+      String(newestUpdateTime),
+      scopedMessageRevision
     ].join('|');
   }
 
@@ -227,12 +269,29 @@ export function App() {
     if (!chatId) {
       return null;
     }
+    const requestKey = telegramChatLoadKey(chatId, topicId);
+    const requestSequence = (telegramThreadRequestSequences.current.get(requestKey) ?? 0) + 1;
+    telegramThreadRequestSequences.current.set(requestKey, requestSequence);
     try {
       const thread = await api.getTelegramThread({ chatId, topicId, limit: 50 });
-      setTelegramThread(thread);
+      const currentThread = selectedTelegramThreadRef.current;
+      const isLatestRequest = telegramThreadRequestSequences.current.get(requestKey) === requestSequence;
+      const isCurrentThread =
+        currentThread.chatId === chatId &&
+        (currentThread.topicId ?? '') === (topicId ?? '');
+      if (isLatestRequest && isCurrentThread) {
+        setTelegramThread(thread);
+      }
       return thread;
     } catch (error) {
-      notify(error instanceof Error ? error.message : 'Не удалось открыть Telegram-чат.', 'error');
+      const currentThread = selectedTelegramThreadRef.current;
+      const isLatestRequest = telegramThreadRequestSequences.current.get(requestKey) === requestSequence;
+      const isCurrentThread =
+        currentThread.chatId === chatId &&
+        (currentThread.topicId ?? '') === (topicId ?? '');
+      if (isLatestRequest && isCurrentThread) {
+        notify(error instanceof Error ? error.message : 'Не удалось открыть Telegram-чат.', 'error');
+      }
       return null;
     }
   }
@@ -283,6 +342,10 @@ export function App() {
     setSelectedMessageIds([]);
     const requestTopicId = currentThreadTopicId(nextTopicId);
     const requestKey = telegramChatLoadKey(chatId, requestTopicId);
+    selectedTelegramThreadRef.current = {
+      chatId,
+      topicId: requestTopicId
+    };
     if (state) {
       activeChatLoadSignals.current.set(
         requestKey,

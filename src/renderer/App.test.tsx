@@ -118,6 +118,16 @@ function connectedState(): AppState {
   };
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+  return { promise, resolve, reject };
+}
+
 function installBridge(initialState: AppState) {
   let state = initialState;
   const telegramInboxSnapshot = (): TelegramInboxSnapshot => {
@@ -1068,7 +1078,7 @@ describe('App', () => {
     );
   });
 
-  it('does not mark the selected Telegram chat as read when a realtime update changes unread count', async () => {
+  it('refreshes the focused Telegram thread after a realtime update adds a message', async () => {
     const state = connectedState();
     state.telegram.chats[0].unreadCount = 0;
     const api = installBridge(state);
@@ -1084,6 +1094,19 @@ describe('App', () => {
     api.getTelegramThread.mockClear();
     api.loadChatMessages.mockClear();
 
+    const incomingMessage: TelegramMessage = {
+      id: 'chat_1:11',
+      chatId: 'chat_1',
+      topicId: null,
+      senderId: 'user_2',
+      senderName: 'Борис',
+      senderAvatar: null,
+      sentAt: '2026-05-27T10:01:00.000Z',
+      text: 'Новое входящее сообщение.',
+      status: 'new',
+      createdAt: '2026-05-27T10:01:00.000Z',
+      updatedAt: '2026-05-27T10:01:00.000Z'
+    };
     const realtimeState = connectedState();
     realtimeState.telegram.chats[0] = {
       ...realtimeState.telegram.chats[0],
@@ -1092,28 +1115,139 @@ describe('App', () => {
     };
     realtimeState.telegram.messages = [
       ...realtimeState.telegram.messages,
-      {
-        id: 'chat_1:11',
-        chatId: 'chat_1',
-        topicId: null,
-        senderId: 'user_2',
-        senderName: 'Борис',
-        senderAvatar: null,
-        sentAt: '2026-05-27T10:01:00.000Z',
-        text: 'Новое входящее сообщение.',
-        status: 'new',
-        createdAt: '2026-05-27T10:01:00.000Z',
-        updatedAt: '2026-05-27T10:01:00.000Z'
-      }
+      incomingMessage
     ];
+    api.getTelegramThread.mockResolvedValueOnce({
+      key: { chatId: 'chat_1', topicId: null },
+      messages: realtimeState.telegram.messages,
+      hasOlder: false,
+      loading: false
+    });
     const onStateChanged = api.onStateChanged.mock.calls[0]?.[0] as ((state: AppState) => void) | undefined;
     await act(async () => {
       onStateChanged?.(realtimeState);
     });
 
+    await waitFor(() =>
+      expect(api.getTelegramThread).toHaveBeenCalledWith({
+        chatId: 'chat_1',
+        topicId: null,
+        limit: 50
+      })
+    );
+    expect(await screen.findByText('Новое входящее сообщение.')).toBeInTheDocument();
     expect(screen.getByText('1', { selector: '.unread-badge' })).toBeInTheDocument();
-    expect(screen.queryByText('Новое входящее сообщение.')).not.toBeInTheDocument();
     expect(api.loadChatMessages).not.toHaveBeenCalled();
+  });
+
+  it('keeps a sent Telegram message visible after refreshing the focused thread', async () => {
+    const state = connectedState();
+    const api = installBridge(state);
+    const user = userEvent.setup();
+    const sentMessage: TelegramMessage = {
+      id: 'chat_1:12',
+      chatId: 'chat_1',
+      topicId: null,
+      senderId: null,
+      senderName: 'Вы',
+      senderAvatar: null,
+      sentAt: '2026-05-27T10:02:00.000Z',
+      text: 'Отправленное сообщение остается в треде.',
+      status: 'new',
+      createdAt: '2026-05-27T10:02:00.000Z',
+      updatedAt: '2026-05-27T10:02:00.000Z'
+    };
+    const sentState: AppState = {
+      ...state,
+      telegram: {
+        ...state.telegram,
+        messages: [...state.telegram.messages, sentMessage],
+        chats: state.telegram.chats.map((chat) =>
+          chat.id === 'chat_1'
+            ? { ...chat, lastMessageAt: sentMessage.sentAt }
+            : chat
+        )
+      }
+    };
+    api.sendTelegramMessage.mockResolvedValueOnce(sentState);
+    api.getTelegramThread.mockResolvedValueOnce({
+      key: { chatId: 'chat_1', topicId: null },
+      messages: state.telegram.messages,
+      hasOlder: false,
+      loading: false
+    });
+    api.getTelegramThread.mockResolvedValueOnce({
+      key: { chatId: 'chat_1', topicId: null },
+      messages: sentState.telegram.messages,
+      hasOlder: false,
+      loading: false
+    });
+    render(<App />);
+
+    await screen.findByRole('heading', { name: 'Backend Team' });
+    await user.type(screen.getByPlaceholderText('Сообщение в Backend Team'), sentMessage.text);
+    await user.click(screen.getByRole('button', { name: 'Отправить' }));
+
+    await waitFor(() => expect(api.sendTelegramMessage).toHaveBeenCalled());
+    expect(await screen.findByText('Отправленное сообщение остается в треде.')).toBeInTheDocument();
+    expect(screen.queryByText((content, element) =>
+      Boolean(element?.closest('[data-message-id^="optimistic:"]')) && content === sentMessage.text
+    )).not.toBeInTheDocument();
+  });
+
+  it('keeps the newer focused thread when an older same-thread request resolves later', async () => {
+    const state = connectedState();
+    const api = installBridge(state);
+    const firstRequest = deferred<TelegramThreadView>();
+    const newerMessage: TelegramMessage = {
+      ...state.telegram.messages[0],
+      id: 'chat_1:11',
+      sentAt: '2026-05-27T10:01:00.000Z',
+      text: 'Новое состояние треда.'
+    };
+    const realtimeState: AppState = {
+      ...state,
+      telegram: {
+        ...state.telegram,
+        chats: state.telegram.chats.map((chat) =>
+          chat.id === 'chat_1'
+            ? { ...chat, lastMessageAt: newerMessage.sentAt, unreadCount: 2 }
+            : chat
+        ),
+        messages: [...state.telegram.messages, newerMessage]
+      }
+    };
+    api.getTelegramThread.mockImplementationOnce(() => firstRequest.promise);
+    api.getTelegramThread.mockResolvedValueOnce({
+      key: { chatId: 'chat_1', topicId: null },
+      messages: realtimeState.telegram.messages,
+      hasOlder: false,
+      loading: false
+    });
+    render(<App />);
+
+    await waitFor(() => expect(api.getTelegramThread).toHaveBeenCalledTimes(1));
+    const onStateChanged = api.onStateChanged.mock.calls[0]?.[0] as ((state: AppState) => void) | undefined;
+    await act(async () => {
+      onStateChanged?.(realtimeState);
+    });
+    expect(await screen.findByText('Новое состояние треда.')).toBeInTheDocument();
+
+    await act(async () => {
+      firstRequest.resolve({
+        key: { chatId: 'chat_1', topicId: null },
+        messages: [{
+          ...state.telegram.messages[0],
+          id: 'chat_1:stale',
+          text: 'Устаревший ответ треда.'
+        }],
+        hasOlder: false,
+        loading: false
+      });
+    });
+
+    expect(screen.getByText('Новое состояние треда.')).toBeInTheDocument();
+    expect(screen.queryByText('Устаревший ответ треда.')).not.toBeInTheDocument();
   });
 
   it('shows AI queue as a separate tab and opens a queued task target', async () => {
