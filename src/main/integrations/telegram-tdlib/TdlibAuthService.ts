@@ -9,11 +9,37 @@ export interface TdlibAuthConfig {
   databaseEncryptionKey: string;
 }
 
+function normalizeRequiredString(field: keyof TdlibAuthConfig, value: string): string {
+  const normalizedValue = value.trim();
+  if (!normalizedValue) {
+    throw new Error(`Invalid TDLib auth config: ${field} must be non-empty`);
+  }
+  return normalizedValue;
+}
+
+function normalizeConfig(config: TdlibAuthConfig): TdlibAuthConfig {
+  if (!Number.isInteger(config.apiId) || config.apiId <= 0) {
+    throw new Error('Invalid TDLib auth config: apiId must be a positive integer');
+  }
+
+  return {
+    apiId: config.apiId,
+    apiHash: normalizeRequiredString('apiHash', config.apiHash),
+    databaseDirectory: normalizeRequiredString('databaseDirectory', config.databaseDirectory),
+    filesDirectory: normalizeRequiredString('filesDirectory', config.filesDirectory),
+    databaseEncryptionKey: normalizeRequiredString('databaseEncryptionKey', config.databaseEncryptionKey)
+  };
+}
+
 export class TdlibAuthService {
+  private readonly config: TdlibAuthConfig;
+
   constructor(
     private readonly client: TdlibClient,
-    private readonly config: TdlibAuthConfig
-  ) {}
+    config: TdlibAuthConfig
+  ) {
+    this.config = normalizeConfig(config);
+  }
 
   async handleAuthorizationState(state: TdlibObject): Promise<void> {
     if (state['@type'] !== 'authorizationStateWaitTdlibParameters') {
