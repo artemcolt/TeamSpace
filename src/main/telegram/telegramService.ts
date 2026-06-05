@@ -315,6 +315,19 @@ export class TelegramService {
   }
 
   async getThread(payload: TelegramThreadRequest): Promise<TelegramThreadView> {
+    const cachedTelegram = this.store.getState().telegram;
+    const cachedMessages = this.threadMessages(cachedTelegram.messages, payload);
+    if (cachedMessages.length > 0) {
+      void this.loadChatMessagesForCache({
+        chatId: payload.chatId,
+        topicId: payload.topicId ?? undefined
+      }, {
+        markChatRead: false,
+        clearUnread: false
+      }).catch(() => undefined);
+      return this.threadViewFromMessages(payload, cachedMessages);
+    }
+
     const state = await this.loadChatMessagesForCache({
       chatId: payload.chatId,
       topicId: payload.topicId ?? undefined
@@ -322,11 +335,18 @@ export class TelegramService {
       markChatRead: false,
       clearUnread: false
     });
-    const limit = Math.max(1, Math.trunc(payload.limit ?? 50));
-    const messages = state.telegram.messages
+    return this.threadViewFromMessages(payload, this.threadMessages(state.telegram.messages, payload));
+  }
+
+  private threadMessages(messages: TelegramMessage[], payload: TelegramThreadRequest): TelegramMessage[] {
+    return messages
       .filter((message) => message.chatId === payload.chatId)
       .filter((message) => payload.topicId === null || message.topicId === payload.topicId)
       .sort((a, b) => new Date(a.sentAt).getTime() - new Date(b.sentAt).getTime());
+  }
+
+  private threadViewFromMessages(payload: TelegramThreadRequest, messages: TelegramMessage[]): TelegramThreadView {
+    const limit = Math.max(1, Math.trunc(payload.limit ?? 50));
     const limitedMessages = messages.slice(-limit);
     return {
       key: { chatId: payload.chatId, topicId: payload.topicId },

@@ -261,6 +261,39 @@ describe('TelegramService workspace sync', () => {
     expect(thread.hasOlder).toBe(true);
   });
 
+  it('returns cached focused thread messages when network refresh is delayed or failing', async () => {
+    const state = defaultState();
+    state.telegram.chats = [
+      {
+        id: 'chat_1',
+        title: 'Team Chat',
+        type: 'group',
+        avatar: null,
+        hasTopics: false,
+        selected: true,
+        notificationsEnabled: true,
+        lastSyncedAt: '2026-06-01T09:00:00.000Z',
+        lastMessageAt: '2026-06-01T10:00:00.000Z',
+        unreadCount: 0
+      }
+    ];
+    state.telegram.messages = [
+      telegramMessage({ id: 'chat_1:1', text: 'Cached message' })
+    ];
+    const store = createStore(state);
+    const service = new TelegramService(store);
+    const refresh = vi.spyOn(service as unknown as {
+      loadChatMessagesForCache: () => Promise<AppState>;
+    }, 'loadChatMessagesForCache')
+      .mockRejectedValue(new Error('network blocked'));
+
+    await expect(service.getThread({ chatId: 'chat_1', topicId: null, limit: 50 })).resolves.toMatchObject({
+      key: { chatId: 'chat_1', topicId: null },
+      messages: [{ id: 'chat_1:1', text: 'Cached message' }]
+    });
+    expect(refresh).toHaveBeenCalledOnce();
+  });
+
   it('keeps selected cached chats when Telegram does not return them in the dialog batch', async () => {
     const state = defaultState();
     state.telegram.chats = [
