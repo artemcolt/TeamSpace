@@ -40,6 +40,7 @@ export function App() {
   const [selectedChatId, setSelectedChatId] = useState<string>('');
   const [selectedTopicId, setSelectedTopicId] = useState<string>('');
   const [selectedMessageIds, setSelectedMessageIds] = useState<string[]>([]);
+  const [telegramThread, setTelegramThread] = useState<TelegramThreadView | null>(null);
   const [browserUrl, setBrowserUrl] = useState('');
   const [busy, setBusy] = useState(false);
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -94,35 +95,6 @@ export function App() {
   }, [selectedChatId, selectedTopicId, state]);
 
   const selectedChat = state?.telegram.chats.find((chat) => chat.id === selectedChatId);
-  const telegramMessageIndex = useMemo(() => {
-    const byChat = new Map<string, TelegramMessage[]>();
-    const byTopic = new Map<string, TelegramMessage[]>();
-
-    for (const message of state?.telegram.messages ?? []) {
-      const chatMessages = byChat.get(message.chatId);
-      if (chatMessages) {
-        chatMessages.push(message);
-      } else {
-        byChat.set(message.chatId, [message]);
-      }
-
-      if (message.topicId) {
-        const topicMessages = byTopic.get(message.topicId);
-        if (topicMessages) {
-          topicMessages.push(message);
-        } else {
-          byTopic.set(message.topicId, [message]);
-        }
-      }
-    }
-
-    const sentAtAsc = (a: TelegramMessage, b: TelegramMessage) =>
-      new Date(a.sentAt).getTime() - new Date(b.sentAt).getTime();
-    byChat.forEach((messages) => messages.sort(sentAtAsc));
-    byTopic.forEach((messages) => messages.sort(sentAtAsc));
-
-    return { byChat, byTopic };
-  }, [state?.telegram.messages]);
   const selectedChatTopics = useMemo(() => {
     if (!state) {
       return [];
@@ -141,7 +113,7 @@ export function App() {
       return;
     }
 
-    const requestTopicId = selectedTopicId && selectedTopicId !== 'all' ? selectedTopicId : undefined;
+    const requestTopicId = currentThreadTopicId(selectedTopicId);
     const requestKey = telegramChatLoadKey(selectedChatId, requestTopicId);
     const loadSignal = telegramChatLoadSignal(state.telegram, selectedChatId, requestTopicId);
     if (activeChatLoadSignals.current.get(requestKey) === loadSignal) {
@@ -149,12 +121,9 @@ export function App() {
     }
 
     activeChatLoadSignals.current.set(requestKey, loadSignal);
-    void loadTelegramChatMessages(selectedChatId, requestTopicId).then((nextState) => {
-      if (nextState) {
-        activeChatLoadSignals.current.set(
-          requestKey,
-          telegramChatLoadSignal(nextState.telegram, selectedChatId, requestTopicId)
-        );
+    void loadTelegramThread(selectedChatId, requestTopicId).then((thread) => {
+      if (!thread) {
+        activeChatLoadSignals.current.delete(requestKey);
       }
     });
   }, [
@@ -168,14 +137,15 @@ export function App() {
   ]);
 
   const selectedMessages = useMemo(() => {
-    if (!selectedChatId) {
-      return [];
+    const topicId = currentThreadTopicId(selectedTopicId);
+    if (
+      telegramThread?.key.chatId === selectedChatId &&
+      (telegramThread.key.topicId ?? '') === (topicId ?? '')
+    ) {
+      return telegramThread.messages;
     }
-    if (selectedTopicId && selectedTopicId !== 'all') {
-      return telegramMessageIndex.byTopic.get(selectedTopicId) ?? [];
-    }
-    return telegramMessageIndex.byChat.get(selectedChatId) ?? [];
-  }, [selectedChatId, selectedTopicId, telegramMessageIndex]);
+    return [];
+  }, [selectedChatId, selectedTopicId, telegramThread]);
 
   const katyaConfigured = hasKatyaSession;
   const readyForMainFlow = Boolean(state && isRequiredWorkspaceReady(state, katyaConfigured));
@@ -217,7 +187,11 @@ export function App() {
     }
     try {
       const nextState = await action();
+      const shouldRefreshThread = nextState.telegram.messages !== state?.telegram.messages;
       setState(nextState);
+      if (shouldRefreshThread && selectedChatId) {
+        await loadTelegramThread(selectedChatId, currentThreadTopicId());
+      }
       if (success) {
         notify(success);
       }
@@ -232,17 +206,35 @@ export function App() {
     }
   }
 
-  function telegramChatLoadKey(chatId: string, topicId?: string) {
+  function telegramChatLoadKey(chatId: string, topicId?: string | null) {
     return `${chatId}:${topicId ?? ''}`;
   }
 
-  function telegramChatLoadSignal(telegram: AppState['telegram'], chatId: string, topicId?: string) {
+  function telegramChatLoadSignal(telegram: AppState['telegram'], chatId: string, topicId?: string | null) {
     const chat = telegram.chats.find((item) => item.id === chatId);
     const topic = topicId ? telegram.topics.find((item) => item.id === topicId) : undefined;
     return [
       chat ? chat.id : '',
       topicId ? topic?.id ?? '' : ''
     ].join('|');
+  }
+
+  function currentThreadTopicId(topicId = selectedTopicId): string | null {
+    return topicId && topicId !== 'all' ? topicId : null;
+  }
+
+  async function loadTelegramThread(chatId: string, topicId: string | null) {
+    if (!chatId) {
+      return null;
+    }
+    try {
+      const thread = await api.getTelegramThread({ chatId, topicId, limit: 50 });
+      setTelegramThread(thread);
+      return thread;
+    } catch (error) {
+      notify(error instanceof Error ? error.message : 'Не удалось открыть Telegram-чат.', 'error');
+      return null;
+    }
   }
 
   async function loadTelegramChatMessages(chatId: string, topicId?: string) {
@@ -289,7 +281,7 @@ export function App() {
     })[0]?.id ?? '';
     setSelectedTopicId(nextTopicId);
     setSelectedMessageIds([]);
-    const requestTopicId = nextTopicId || undefined;
+    const requestTopicId = currentThreadTopicId(nextTopicId);
     const requestKey = telegramChatLoadKey(chatId, requestTopicId);
     if (state) {
       activeChatLoadSignals.current.set(
@@ -297,12 +289,9 @@ export function App() {
         telegramChatLoadSignal(state.telegram, chatId, requestTopicId)
       );
     }
-    void loadTelegramChatMessages(chatId, requestTopicId).then((nextState) => {
-      if (nextState) {
-        activeChatLoadSignals.current.set(
-          requestKey,
-          telegramChatLoadSignal(nextState.telegram, chatId, requestTopicId)
-        );
+    void loadTelegramThread(chatId, requestTopicId).then((thread) => {
+      if (!thread) {
+        activeChatLoadSignals.current.delete(requestKey);
       }
     });
   }

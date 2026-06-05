@@ -319,18 +319,9 @@ export function Inbox({
     return nextState;
   }
 
-  async function openTopic(topicId: string) {
+  function openTopic(topicId: string) {
     setSelectedTopicId(topicId);
     setSelectedMessageIds([]);
-    await runAction(
-      () =>
-        api.loadChatMessages({
-          chatId: selectedChatId,
-          topicId: topicId && topicId !== 'all' ? topicId : undefined
-        }),
-      undefined,
-      { blockUi: false }
-    );
   }
 
   async function toggleChatNotifications(chat: TelegramChat) {

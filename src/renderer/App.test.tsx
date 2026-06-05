@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from './App';
@@ -902,7 +902,7 @@ describe('App', () => {
     render(<App />);
 
     await screen.findByRole('heading', { name: 'Backend Team' });
-    await user.click(screen.getByText('Добавить проверку обязательных полей Redmine.'));
+    await user.click(await screen.findByText('Добавить проверку обязательных полей Redmine.'));
     await user.click(screen.getByRole('button', { name: 'Создать задачу' }));
 
     await waitFor(() => expect(api.createRedmineIssueFromMessages).toHaveBeenCalledWith({ messageIds: ['chat_1:10'] }));
@@ -927,7 +927,7 @@ describe('App', () => {
     render(<App />);
 
     await screen.findByRole('heading', { name: 'Backend Team' });
-    await user.click(screen.getByText('Добавить проверку обязательных полей Redmine.'));
+    await user.click(await screen.findByText('Добавить проверку обязательных полей Redmine.'));
     await user.click(screen.getByRole('button', { name: 'Создать задачу' }));
 
     await waitFor(() =>
@@ -998,10 +998,57 @@ describe('App', () => {
     render(<App />);
 
     await screen.findByRole('heading', { name: 'Backend Team' });
-    const newest = screen.getByText('Самое новое сообщение');
-    const oldest = screen.getByText('Старое сообщение');
+    const newest = await screen.findByText('Самое новое сообщение');
+    const oldest = await screen.findByText('Старое сообщение');
 
     expect(oldest.compareDocumentPosition(newest) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('loads Telegram thread through focused thread API when opening a chat', async () => {
+    const state = connectedState();
+    state.telegram.chats[0].selected = true;
+    const api = installBridge(state);
+    api.getTelegramThread = vi.fn(async (): Promise<TelegramThreadView> => ({
+      key: { chatId: 'chat_1', topicId: null },
+      messages: state.telegram.messages,
+      hasOlder: false,
+      loading: false
+    }));
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByRole('button', { name: /Сообщения/ }));
+    await user.click(screen.getAllByRole('button', { name: /Backend Team/ })[0]);
+
+    await waitFor(() =>
+      expect(api.getTelegramThread).toHaveBeenCalledWith({
+        chatId: 'chat_1',
+        topicId: null,
+        limit: 50
+      })
+    );
+  });
+
+  it('shows Telegram messages from the focused thread response', async () => {
+    const state = connectedState();
+    const threadMessage: TelegramMessage = {
+      ...state.telegram.messages[0],
+      id: 'chat_1:thread-only',
+      text: 'Сообщение пришло из thread API.'
+    };
+    state.telegram.messages = [];
+    const api = installBridge(state);
+    api.getTelegramThread = vi.fn(async (): Promise<TelegramThreadView> => ({
+      key: { chatId: 'chat_1', topicId: null },
+      messages: [threadMessage],
+      hasOlder: false,
+      loading: false
+    }));
+    render(<App />);
+
+    await screen.findByRole('heading', { name: 'Backend Team' });
+
+    expect(await screen.findByText('Сообщение пришло из thread API.')).toBeInTheDocument();
   });
 
   it('refreshes the selected Telegram chat even when cached messages are already present', async () => {
@@ -1013,9 +1060,10 @@ describe('App', () => {
     await screen.findByRole('heading', { name: 'Backend Team' });
 
     await waitFor(() =>
-      expect(api.loadChatMessages).toHaveBeenCalledWith({
+      expect(api.getTelegramThread).toHaveBeenCalledWith({
         chatId: 'chat_1',
-        topicId: undefined
+        topicId: null,
+        limit: 50
       })
     );
   });
@@ -1027,11 +1075,13 @@ describe('App', () => {
     render(<App />);
 
     await waitFor(() =>
-      expect(api.loadChatMessages).toHaveBeenCalledWith({
+      expect(api.getTelegramThread).toHaveBeenCalledWith({
         chatId: 'chat_1',
-        topicId: undefined
+        topicId: null,
+        limit: 50
       })
     );
+    api.getTelegramThread.mockClear();
     api.loadChatMessages.mockClear();
 
     const realtimeState = connectedState();
@@ -1057,10 +1107,12 @@ describe('App', () => {
       }
     ];
     const onStateChanged = api.onStateChanged.mock.calls[0]?.[0] as ((state: AppState) => void) | undefined;
-    onStateChanged?.(realtimeState);
+    await act(async () => {
+      onStateChanged?.(realtimeState);
+    });
 
-    expect(await screen.findByText('Новое входящее сообщение.')).toBeInTheDocument();
     expect(screen.getByText('1', { selector: '.unread-badge' })).toBeInTheDocument();
+    expect(screen.queryByText('Новое входящее сообщение.')).not.toBeInTheDocument();
     expect(api.loadChatMessages).not.toHaveBeenCalled();
   });
 
@@ -1142,6 +1194,7 @@ describe('App', () => {
     const { container } = render(<App />);
 
     await screen.findByRole('heading', { name: 'Backend Team' });
+    await waitFor(() => expect(container.querySelector('.message-avatar img')).not.toBeNull());
 
     expect(container.querySelector('.message-avatar img')).toHaveAttribute(
       'src',
@@ -1154,6 +1207,7 @@ describe('App', () => {
     const { container } = render(<App />);
 
     await screen.findByRole('heading', { name: 'Backend Team' });
+    await screen.findByText('Добавить проверку обязательных полей Redmine.');
 
     expect(container.querySelector('.chat-avatar img')).toBeNull();
     expect(container.querySelector('.message-avatar img')).toBeNull();
@@ -1180,7 +1234,7 @@ describe('App', () => {
     const { container } = render(<App />);
 
     await screen.findByRole('heading', { name: 'Backend Team' });
-    expect(screen.getByText('IMG_1839.MP4')).toBeInTheDocument();
+    expect(await screen.findByText('IMG_1839.MP4')).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Загрузить видео' }));
 
@@ -1215,7 +1269,7 @@ describe('App', () => {
     await screen.findByRole('heading', { name: 'Backend Team' });
     expect(screen.getByRole('button', { name: 'Создать задачу' })).toBeDisabled();
 
-    await userEvent.click(screen.getByRole('button', { name: 'Открыть изображение screenshot.png' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Открыть изображение screenshot.png' }));
 
     expect(screen.getByRole('dialog', { name: 'screenshot.png' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Создать задачу' })).toBeDisabled();
@@ -1269,6 +1323,7 @@ describe('App', () => {
     render(<App />);
 
     await screen.findByRole('heading', { name: 'Backend Team' });
+    await screen.findByText('Добавить проверку обязательных полей Redmine.');
     await user.click(screen.getByRole('button', { name: 'Ответить' }));
     await waitFor(() =>
       expect(screen.getAllByText('Добавить проверку обязательных полей Redmine.').length).toBeGreaterThan(1)
@@ -1290,6 +1345,7 @@ describe('App', () => {
     render(<App />);
 
     await screen.findByRole('heading', { name: 'Backend Team' });
+    await screen.findByText('Добавить проверку обязательных полей Redmine.');
     await user.click(screen.getByRole('button', { name: 'Поставить палец вверх' }));
 
     await waitFor(() =>
@@ -1312,7 +1368,7 @@ describe('App', () => {
 
     await screen.findByRole('heading', { name: 'Backend Team' });
 
-    expect(screen.getByLabelText('Реакции')).toHaveTextContent('🔥2');
+    expect(await screen.findByLabelText('Реакции')).toHaveTextContent('🔥2');
     expect(screen.getByRole('button', { name: 'Поставить палец вверх' })).toHaveTextContent('1');
   });
 
@@ -1326,7 +1382,7 @@ describe('App', () => {
     render(<App />);
 
     await screen.findByRole('heading', { name: 'Backend Team' });
-    await user.click(screen.getByLabelText('Реакция 🔥: 2. Анна, Петр'));
+    await user.click(await screen.findByLabelText('Реакция 🔥: 2. Анна, Петр'));
 
     expect(screen.getAllByText('Анна').length).toBeGreaterThan(1);
     expect(screen.getByText('Петр')).toBeInTheDocument();
@@ -1356,7 +1412,7 @@ describe('App', () => {
     render(<App />);
 
     await screen.findByRole('heading', { name: 'Backend Team' });
-    await user.click(screen.getByRole('button', { name: 'Перейти к сообщению: Анна' }));
+    await user.click(await screen.findByRole('button', { name: 'Перейти к сообщению: Анна' }));
 
     const sourceMessage = screen.getAllByText('Исходное сообщение')[0].closest('.message-row');
     expect(sourceMessage).toHaveClass('reply-target-highlight');
@@ -1603,7 +1659,7 @@ describe('App', () => {
     render(<App />);
 
     await screen.findByRole('heading', { name: 'Backend Team' });
-    await user.click(screen.getByRole('button', { name: 'https://example.com/spec' }));
+    await user.click(await screen.findByRole('button', { name: 'https://example.com/spec' }));
 
     await screen.findByRole('button', { name: 'Браузер' });
     await waitFor(() =>
@@ -1667,7 +1723,7 @@ describe('App', () => {
     render(<App />);
 
     await screen.findByRole('heading', { name: 'Backend Team' });
-    expect(screen.getByRole('button', { name: 'Открыть встречу' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Открыть встречу' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Удалить Катю' })).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Пригласить Катю' }));
 
@@ -1860,6 +1916,9 @@ describe('App', () => {
     await user.click(await view.findByRole('button', { name: 'Мои задачи' }));
     await view.findByRole('heading', { name: '#123 - Проверить обработку спринта' });
     await user.click(view.getByRole('button', { name: 'Открыть карточку задачи #123 в приложении' }));
+    await waitFor(() =>
+      expect(api.loadRedmineIssueDetails).toHaveBeenCalledWith({ issueId: '123' })
+    );
 
     expect(await view.findByText('Контекст:')).toBeInTheDocument();
     expect(view.getByText('Алексей написал сообщение: «Как дела?»')).toBeInTheDocument();
@@ -2268,12 +2327,16 @@ describe('App', () => {
 
     expect(await screen.findByRole('button', { name: /Флуд/ })).toBeInTheDocument();
     await waitFor(() => expect(screen.queryByText('Сообщение из AI')).not.toBeInTheDocument());
-    expect(screen.getByText('Сообщение из флуда')).toBeInTheDocument();
+    expect(await screen.findByText('Сообщение из флуда')).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: /AI/ }));
 
     await waitFor(() =>
-      expect(api.loadChatMessages).toHaveBeenCalledWith({ chatId: 'chat_1', topicId: 'chat_1:topic:102' })
+      expect(api.getTelegramThread).toHaveBeenCalledWith({
+        chatId: 'chat_1',
+        topicId: 'chat_1:topic:102',
+        limit: 50
+      })
     );
     expect(await screen.findByText('Сообщение из AI')).toBeInTheDocument();
   });
