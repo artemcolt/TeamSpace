@@ -43,7 +43,7 @@ import type {
 import { RedmineService } from '../redmine/redmineService';
 import { markdownToRedmineHtml } from '../redmine/redmineMarkup';
 import { LocalStore } from '../storage/localStore';
-import { TelegramService } from '../telegram/telegramService';
+import type { TelegramIpcService } from '../features/inbox/tdlibTelegramFacade';
 import { GitLabService } from '../gitlab/gitlabService';
 
 const CODEX_PROXY_TIMEOUT_MS = 5 * 60 * 1000;
@@ -2023,7 +2023,7 @@ async function findLatestGeneratedIssueDescriptions(issueIds: string[]): Promise
 
 export function registerIpcHandlers(
   store: LocalStore,
-  telegram: TelegramService,
+  telegram: TelegramIpcService,
   redmine: RedmineService,
   gitlab: GitLabService
 ): void {

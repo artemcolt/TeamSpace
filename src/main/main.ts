@@ -9,6 +9,10 @@ import { store } from './storage/localStore';
 import { TelegramService } from './telegram/telegramService';
 import { telegramUnreadNotificationCount } from './domain/appState';
 import type { AppState, TelegramChat, TelegramMessage } from './domain/types';
+import { resolveTdlibLibraryPath } from './integrations/telegram-tdlib/TdlibBinaryResolver';
+import { TdlibJsonClient } from './integrations/telegram-tdlib/TdlibJsonClient';
+import { TelegramInboxService } from './features/inbox/TelegramInboxService';
+import { TdlibTelegramFacade, type TelegramIpcService } from './features/inbox/tdlibTelegramFacade';
 
 const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
 const MAIL_DEFAULT_URL = 'https://mail.example.com/';
@@ -26,6 +30,8 @@ const GOOGLE_AUTH_HOSTS = new Set([
 ]);
 const APP_NAME = 'Workspace';
 const USER_DATA_DIRECTORY_NAME = 'team-space-desktop';
+const TDLIB_LOAD_ERROR =
+  'TDLib не загружен. Проверьте libtdjson в build/tdlib или отключите TELEGRAM_TDLIB_ENABLED.';
 
 app.setName(APP_NAME);
 app.setPath('userData', path.join(app.getPath('appData'), USER_DATA_DIRECTORY_NAME));
@@ -1126,6 +1132,33 @@ function handleAppStateChanged(state: AppState): void {
   lastUnreadNotificationState = state;
 }
 
+async function createTelegramIpcService(): Promise<TelegramIpcService> {
+  const legacy = new TelegramService(store, {
+    onStateChanged: sendStateChanged
+  });
+  if (process.env.TELEGRAM_TDLIB_ENABLED !== 'true') {
+    return legacy;
+  }
+
+  try {
+    const client = new TdlibJsonClient(resolveTdlibLibraryPath({
+      platform: process.platform,
+      resourcesPath: process.resourcesPath,
+      appPath: process.cwd(),
+      isPackaged: app.isPackaged
+    }));
+    await client.start();
+    const tdlibInbox = new TelegramInboxService(client, store.getTelegramInboxRepository());
+    return new TdlibTelegramFacade(legacy, tdlibInbox);
+  } catch {
+    store.setState((state) => {
+      state.telegram.status = 'error';
+      state.telegram.error = TDLIB_LOAD_ERROR;
+    });
+    return legacy;
+  }
+}
+
 app.whenReady().then(async () => {
   await store.initialize();
   lastUnreadNotificationState = store.getState();
@@ -1137,9 +1170,7 @@ app.whenReady().then(async () => {
   registerBrowserViewIpc();
   registerChatGptViewIpc();
 
-  const telegram = new TelegramService(store, {
-    onStateChanged: sendStateChanged
-  });
+  const telegram = await createTelegramIpcService();
   const redmine = new RedmineService(store);
   const gitlab = new GitLabService(store);
   registerIpcHandlers(store, telegram, redmine, gitlab);
