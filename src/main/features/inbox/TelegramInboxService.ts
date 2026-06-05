@@ -1,13 +1,19 @@
 import type {
+  TelegramAttachmentDownloadResult,
   TelegramInboxSnapshot,
+  TelegramSendMessagePayload,
+  TelegramSendResult,
   TelegramThreadKey,
   TelegramThreadRequest,
   TelegramThreadView
 } from '../../domain/types';
+import { TdlibCommandAdapter } from '../../integrations/telegram-tdlib/TdlibCommandAdapter';
 import type { TdlibClient } from '../../integrations/telegram-tdlib/TdlibClient';
 import { tdlibChatToSummary, tdlibMessageToView } from '../../integrations/telegram-tdlib/TdlibMapper';
+import { TdlibMediaService } from '../../integrations/telegram-tdlib/TdlibMediaService';
 import type { TdlibObject } from '../../integrations/telegram-tdlib/tdlibTypes';
 import type { TelegramInboxRepository } from '../../storage/repositories/telegramInboxRepository';
+import { randomUUID } from 'crypto';
 
 type TdlibMessagesResponse = {
   '@type': 'messages';
@@ -20,10 +26,18 @@ function clampHistoryLimit(limit: number | undefined): number {
 }
 
 export class TelegramInboxService {
+  private readonly commandAdapter: TdlibCommandAdapter;
+  private readonly mediaService: TdlibMediaService;
+
   constructor(
     private readonly client: TdlibClient,
-    private readonly repository: TelegramInboxRepository
-  ) {}
+    private readonly repository: TelegramInboxRepository,
+    commandAdapter?: TdlibCommandAdapter,
+    mediaService?: TdlibMediaService
+  ) {
+    this.commandAdapter = commandAdapter ?? new TdlibCommandAdapter(client);
+    this.mediaService = mediaService ?? new TdlibMediaService(client);
+  }
 
   async getInboxSnapshot(): Promise<TelegramInboxSnapshot> {
     const chatList = await this.client.send<{ '@type': 'chats'; chat_ids: Array<number | string> }>({
@@ -85,6 +99,26 @@ export class TelegramInboxService {
       });
     }
     return this.getInboxSnapshot();
+  }
+
+  async sendMessage(payload: TelegramSendMessagePayload): Promise<TelegramSendResult> {
+    const clientRequestId = payload.clientRequestId ?? randomUUID();
+    await this.commandAdapter.sendMessage(payload);
+    const thread = await this.getThread({
+      chatId: payload.chatId,
+      topicId: payload.topicId,
+      limit: 50
+    });
+    return { clientRequestId, thread };
+  }
+
+  async reactToMessage(payload: { messageId: string; emoticon: string }): Promise<TelegramInboxSnapshot> {
+    await this.commandAdapter.reactToMessage(payload);
+    return this.getInboxSnapshot();
+  }
+
+  async downloadFile(payload: { fileId: number; priority?: number }): Promise<TelegramAttachmentDownloadResult> {
+    return this.mediaService.downloadFile(payload);
   }
 
   private mergeChatIds(tdlibChatIds: Array<number | string>, selectedChatIds: string[]): Array<number | string> {

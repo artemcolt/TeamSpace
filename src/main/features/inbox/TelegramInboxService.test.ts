@@ -182,6 +182,68 @@ describe('TelegramInboxService', () => {
     expect(client.sentRequests().map((request) => request['@type'])).toEqual(['getChatHistory', 'getChats']);
   });
 
+  it('sends a Telegram message through TDLib and returns the refreshed thread', async () => {
+    const client = new FakeTdlibClient();
+    client.replyTo('sendMessage', {
+      '@type': 'message',
+      id: 9,
+      chat_id: 42
+    });
+    client.replyTo('getChatHistory', {
+      '@type': 'messages',
+      total_count: 1,
+      messages: [{
+        '@type': 'message',
+        id: 9,
+        chat_id: 42,
+        date: 1780657220,
+        is_outgoing: true,
+        sender_id: { '@type': 'messageSenderUser', user_id: 9 },
+        content: { '@type': 'messageText', text: { text: 'Ready' } }
+      }]
+    });
+    const service = new TelegramInboxService(client, new InMemoryTelegramInboxRepository());
+
+    await expect(service.sendMessage({
+      chatId: '42',
+      topicId: null,
+      text: 'Ready',
+      clientRequestId: 'request-1'
+    })).resolves.toMatchObject({
+      clientRequestId: 'request-1',
+      thread: {
+        key: { chatId: '42', topicId: null },
+        messages: [{ id: '42:9', text: 'Ready', senderName: 'Вы' }]
+      }
+    });
+    expect(client.sentRequests().map((request) => request['@type'])).toEqual(['sendMessage', 'getChatHistory']);
+  });
+
+  it('reacts to a Telegram message through TDLib and returns the refreshed snapshot', async () => {
+    const client = new FakeTdlibClient();
+    client.replyTo('addMessageReaction', { '@type': 'ok' });
+    client.replyTo('getChats', { '@type': 'chats', chat_ids: [42], total_count: 1 });
+    client.replyTo('getChat', {
+      '@type': 'chat',
+      id: 42,
+      title: 'Backend',
+      type: { '@type': 'chatTypeSupergroup', is_channel: false },
+      unread_count: 0
+    });
+    const repository = new InMemoryTelegramInboxRepository();
+    repository.selectWorkspaceChats(['42']);
+    const service = new TelegramInboxService(client, repository);
+
+    await expect(service.reactToMessage({ messageId: '42:9', emoticon: '👍' })).resolves.toMatchObject({
+      chats: [{ id: '42', title: 'Backend' }]
+    });
+    expect(client.sentRequests()[0]).toMatchObject({
+      '@type': 'addMessageReaction',
+      chat_id: 42,
+      message_id: 9
+    });
+  });
+
   it('loads a topic thread with getMessageThreadHistory', async () => {
     const client = new FakeTdlibClient();
     client.replyTo('getMessageThreadHistory', {
