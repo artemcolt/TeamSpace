@@ -5,6 +5,7 @@ import { defaultState, redmineDefaultUrl } from '../domain/appState';
 import type { AppState, CachedTelegramAvatar, RedmineIssueSummary, SecretFile } from '../domain/types';
 import { LocalRedmineDatabase } from './localRedmineDatabase';
 import { LocalTelegramDatabase } from './localTelegramDatabase';
+import type { TelegramInboxRepository } from './repositories/telegramInboxRepository';
 
 type StateChangeListener = (state: AppState) => void;
 
@@ -112,6 +113,10 @@ export class LocalStore {
 
   saveTelegramAvatar(key: string, dataUrl: string | null): void {
     this.telegramDb.saveAvatar(key, dataUrl);
+  }
+
+  getTelegramInboxRepository(): TelegramInboxRepository {
+    return this.telegramDb.getInboxRepository();
   }
 
   loadCachedRedmineIssues(payload: { projectId: string; sprintId: string; assigneeId?: string }): {

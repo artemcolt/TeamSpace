@@ -161,4 +161,31 @@ describe('LocalTelegramDatabase', () => {
       dataUrl: `data:video/mp4;base64,${mp4Header}`
     }]);
   });
+
+  it('exposes a persistent inbox repository and clears app-specific inbox state', async () => {
+    const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'team-space-telegram-cache-'));
+    tempDirs.push(dataDir);
+    const db = new LocalTelegramDatabase();
+    await db.initialize(dataDir);
+
+    const repository = db.getInboxRepository();
+    repository.selectWorkspaceChats(['10', '20']);
+    repository.setChatNotifications('20', false);
+    repository.setMessageStatus({ messageId: '20:99', chatId: '20', topicId: null, status: 'created' });
+    db.flush();
+
+    const reopenedDb = new LocalTelegramDatabase();
+    await reopenedDb.initialize(dataDir);
+    const reopenedRepository = reopenedDb.getInboxRepository();
+
+    expect(reopenedRepository.selectedChatIds()).toEqual(['10', '20']);
+    expect(reopenedRepository.chatLocalState('20')).toEqual({ selected: true, notificationsEnabled: false });
+    expect(reopenedRepository.messageStatus('20:99')).toBe('created');
+
+    reopenedDb.clear();
+
+    expect(reopenedRepository.selectedChatIds()).toEqual([]);
+    expect(reopenedRepository.chatLocalState('20')).toEqual({ selected: false, notificationsEnabled: true });
+    expect(reopenedRepository.messageStatus('20:99')).toBe('new');
+  });
 });

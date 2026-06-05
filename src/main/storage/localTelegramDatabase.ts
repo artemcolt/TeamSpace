@@ -11,6 +11,7 @@ import type {
   TelegramMessageReaction,
   TelegramTopic
 } from '../domain/types';
+import { SqlTelegramInboxRepository, type TelegramInboxRepository } from './repositories/telegramInboxRepository';
 
 function sniffDataUrlMimeType(dataUrl: string | null): string | null {
   const match = dataUrl?.match(/^data:[^;,]+;base64,([A-Za-z0-9+/=]+)/);
@@ -67,6 +68,7 @@ function attachmentTypeForMimeType(
 export class LocalTelegramDatabase {
   private dbPath = '';
   private db: import('sql.js').Database | null = null;
+  private inboxRepository: SqlTelegramInboxRepository | null = null;
   private flushTimer: ReturnType<typeof setTimeout> | null = null;
 
   async initialize(dataDir: string): Promise<void> {
@@ -77,6 +79,8 @@ export class LocalTelegramDatabase {
     const bytes = fs.existsSync(this.dbPath) ? fs.readFileSync(this.dbPath) : undefined;
     this.db = bytes ? new SQL.Database(bytes) : new SQL.Database();
     this.migrate();
+    this.inboxRepository = new SqlTelegramInboxRepository(this.db);
+    this.inboxRepository.initialize();
     this.flush();
   }
 
@@ -326,7 +330,17 @@ export class LocalTelegramDatabase {
     this.db.run('delete from telegram_topics');
     this.db.run('delete from telegram_chats');
     this.db.run('delete from telegram_avatars');
+    this.db.run('delete from telegram_workspace_chats');
+    this.db.run('delete from telegram_notification_settings');
+    this.db.run('delete from telegram_message_workflow_status');
     this.flush();
+  }
+
+  getInboxRepository(): TelegramInboxRepository {
+    if (!this.inboxRepository) {
+      throw new Error('Telegram inbox repository is not initialized.');
+    }
+    return this.inboxRepository;
   }
 
   getAvatar(key: string): CachedTelegramAvatar | null {
