@@ -44,7 +44,8 @@ export function Inbox({
   setSelectedMessageIds,
   createIssueFromMessages,
   openInternalBrowser,
-  runAction
+  runAction,
+  loadOlderThreadMessages
 }: {
   busy: boolean;
   state: AppState;
@@ -63,7 +64,12 @@ export function Inbox({
   runAction: (
     action: () => Promise<AppState>,
     success?: string,
-    options?: { blockUi?: boolean }
+    options?: { blockUi?: boolean; refreshTelegramThread?: boolean }
+  ) => Promise<AppState | null>;
+  loadOlderThreadMessages: (
+    chatId: string,
+    topicId: string | null,
+    beforeMessageId: string
   ) => Promise<AppState | null>;
 }) {
   const [chatQuery, setChatQuery] = useState('');
@@ -297,15 +303,10 @@ export function Inbox({
     }
 
     setLoadingOlder(true);
-    const nextState = await runAction(
-      () =>
-        api.loadOlderChatMessages({
-          chatId: selectedChatId,
-          topicId: selectedTopicId && selectedTopicId !== 'all' ? selectedTopicId : undefined,
-          beforeMessageId: oldestMessageId
-        }),
-      undefined,
-      { blockUi: false }
+    const nextState = await loadOlderThreadMessages(
+      selectedChatId,
+      selectedTopicId && selectedTopicId !== 'all' ? selectedTopicId : null,
+      oldestMessageId
     );
     const nextVisibleCount = nextState?.telegram.messages
       .filter((message) =>

@@ -128,7 +128,10 @@ export function App() {
     const requestTopicId = currentThreadTopicId(selectedTopicId);
     const requestKey = telegramChatLoadKey(selectedChatId, requestTopicId);
     const loadSignal = telegramChatLoadSignal(state.telegram, selectedChatId, requestTopicId);
-    if (activeChatLoadSignals.current.get(requestKey) === loadSignal) {
+    if (
+      activeChatLoadSignals.current.get(requestKey) === loadSignal &&
+      telegramThreadMatchesKey(telegramThread, selectedChatId, requestTopicId)
+    ) {
       return;
     }
 
@@ -145,6 +148,7 @@ export function App() {
     selectedChatId,
     selectedTopicId,
     state,
+    telegramThread,
     view
   ]);
 
@@ -191,9 +195,10 @@ export function App() {
   async function runAction(
     action: () => Promise<AppState>,
     success?: string,
-    options: { blockUi?: boolean } = {}
+    options: { blockUi?: boolean; refreshTelegramThread?: boolean } = {}
   ) {
     const blockUi = options.blockUi ?? true;
+    const refreshTelegramThread = options.refreshTelegramThread ?? true;
     if (blockUi) {
       setBusy(true);
     }
@@ -201,7 +206,7 @@ export function App() {
       const nextState = await action();
       const shouldRefreshThread = nextState.telegram.messages !== state?.telegram.messages;
       setState(nextState);
-      if (shouldRefreshThread && selectedChatId) {
+      if (refreshTelegramThread && shouldRefreshThread && selectedChatId) {
         await loadTelegramThread(selectedChatId, currentThreadTopicId());
       }
       if (success) {
@@ -222,12 +227,21 @@ export function App() {
     return `${chatId}:${topicId ?? ''}`;
   }
 
+  function telegramThreadMatchesKey(thread: TelegramThreadView | null, chatId: string, topicId?: string | null) {
+    return thread?.key.chatId === chatId && (thread.key.topicId ?? '') === (topicId ?? '');
+  }
+
+  function scopedTelegramMessages(telegram: AppState['telegram'], chatId: string, topicId?: string | null) {
+    return telegram.messages
+      .filter((message) => message.chatId === chatId)
+      .filter((message) => !topicId || message.topicId === topicId)
+      .sort((a, b) => new Date(a.sentAt).getTime() - new Date(b.sentAt).getTime());
+  }
+
   function telegramChatLoadSignal(telegram: AppState['telegram'], chatId: string, topicId?: string | null) {
     const chat = telegram.chats.find((item) => item.id === chatId);
     const topic = topicId ? telegram.topics.find((item) => item.id === topicId) : undefined;
-    const scopedMessages = telegram.messages
-      .filter((message) => message.chatId === chatId)
-      .filter((message) => !topicId || message.topicId === topicId);
+    const scopedMessages = scopedTelegramMessages(telegram, chatId, topicId);
     const newestMessage = scopedMessages.reduce<TelegramMessage | null>((newest, message) => {
       if (!newest || new Date(message.sentAt).getTime() > new Date(newest.sentAt).getTime()) {
         return message;
@@ -305,6 +319,42 @@ export function App() {
       undefined,
       { blockUi: false }
     );
+  }
+
+  async function loadOlderThreadMessages(chatId: string, topicId: string | null, beforeMessageId: string) {
+    if (!chatId || !beforeMessageId) {
+      return null;
+    }
+    const nextState = await runAction(
+      () =>
+        api.loadOlderChatMessages({
+          chatId,
+          topicId: topicId ?? undefined,
+          beforeMessageId
+        }),
+      undefined,
+      { blockUi: false, refreshTelegramThread: false }
+    );
+    if (!nextState) {
+      return null;
+    }
+
+    const requestKey = telegramChatLoadKey(chatId, topicId);
+    activeChatLoadSignals.current.set(
+      requestKey,
+      telegramChatLoadSignal(nextState.telegram, chatId, topicId)
+    );
+    const messages = scopedTelegramMessages(nextState.telegram, chatId, topicId);
+    setTelegramThread((currentThread) => {
+      if (!currentThread || !telegramThreadMatchesKey(currentThread, chatId, topicId)) {
+        return currentThread;
+      }
+      return {
+        ...currentThread,
+        messages
+      };
+    });
+    return nextState;
   }
 
   async function switchProject(projectId: string) {
@@ -683,6 +733,7 @@ export function App() {
             createIssueFromMessages={createIssueFromSelectedMessages}
             openInternalBrowser={openInternalBrowser}
             runAction={runAction}
+            loadOlderThreadMessages={loadOlderThreadMessages}
           />
         )}
 

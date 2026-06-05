@@ -1250,6 +1250,57 @@ describe('App', () => {
     expect(screen.queryByText('Устаревший ответ треда.')).not.toBeInTheDocument();
   });
 
+  it('keeps older Telegram history visible after loading it through the compatibility API', async () => {
+    const state = connectedState();
+    const newestMessage: TelegramMessage = {
+      ...state.telegram.messages[0],
+      id: 'chat_1:20',
+      sentAt: '2026-05-27T10:20:00.000Z',
+      text: 'Новый край треда.'
+    };
+    const olderMessage: TelegramMessage = {
+      ...state.telegram.messages[0],
+      id: 'chat_1:10',
+      sentAt: '2026-05-27T10:00:00.000Z',
+      text: 'Старое сообщение из истории.'
+    };
+    state.telegram.messages = [newestMessage];
+    const olderState: AppState = {
+      ...state,
+      telegram: {
+        ...state.telegram,
+        messages: [olderMessage, newestMessage]
+      }
+    };
+    const api = installBridge(state);
+    api.getTelegramThread.mockResolvedValue({
+      key: { chatId: 'chat_1', topicId: null },
+      messages: [newestMessage],
+      hasOlder: true,
+      loading: false
+    });
+    api.loadOlderChatMessages.mockResolvedValueOnce(olderState);
+    const { container } = render(<App />);
+
+    expect(await screen.findByText('Новый край треда.')).toBeInTheDocument();
+    api.getTelegramThread.mockClear();
+
+    const thread = container.querySelector('.telegram-thread');
+    expect(thread).not.toBeNull();
+    fireEvent.scroll(thread as Element, { target: { scrollTop: 0 } });
+
+    await waitFor(() =>
+      expect(api.loadOlderChatMessages).toHaveBeenCalledWith({
+        chatId: 'chat_1',
+        topicId: undefined,
+        beforeMessageId: 'chat_1:20'
+      })
+    );
+    expect(await screen.findByText('Старое сообщение из истории.')).toBeInTheDocument();
+    expect(screen.getByText('Новый край треда.')).toBeInTheDocument();
+    expect(api.getTelegramThread).not.toHaveBeenCalled();
+  });
+
   it('shows AI queue as a separate tab and opens a queued task target', async () => {
     const api = installBridge(connectedState());
     api.getAiQueue.mockResolvedValueOnce([
@@ -2473,6 +2524,80 @@ describe('App', () => {
       })
     );
     expect(await screen.findByText('Сообщение из AI')).toBeInTheDocument();
+  });
+
+  it('reloads a Telegram topic when reopening it after another topic was active', async () => {
+    const state = connectedState();
+    state.telegram.chats = state.telegram.chats.map((chat) => ({
+      ...chat,
+      title: 'ГТС',
+      hasTopics: true
+    }));
+    state.telegram.topics = [
+      {
+        id: 'chat_1:topic:101',
+        chatId: 'chat_1',
+        title: 'Флуд',
+        topMessageId: '101',
+        unreadCount: 1,
+        lastMessageAt: '2026-05-27T10:05:00.000Z'
+      },
+      {
+        id: 'chat_1:topic:102',
+        chatId: 'chat_1',
+        title: 'AI',
+        topMessageId: '102',
+        unreadCount: 0,
+        lastMessageAt: '2026-05-27T10:00:00.000Z'
+      }
+    ];
+    state.telegram.messages = [
+      {
+        id: 'chat_1:201',
+        chatId: 'chat_1',
+        topicId: 'chat_1:topic:101',
+        senderId: 'user_1',
+        senderName: 'Анна',
+        senderAvatar: null,
+        sentAt: '2026-05-27T10:05:00.000Z',
+        text: 'Повторно открытый флуд',
+        status: 'new',
+        createdAt: '2026-05-27T10:05:00.000Z',
+        updatedAt: '2026-05-27T10:05:00.000Z'
+      },
+      {
+        id: 'chat_1:202',
+        chatId: 'chat_1',
+        topicId: 'chat_1:topic:102',
+        senderId: 'user_1',
+        senderName: 'Анна',
+        senderAvatar: null,
+        sentAt: '2026-05-27T10:00:00.000Z',
+        text: 'Активный AI топик',
+        status: 'new',
+        createdAt: '2026-05-27T10:00:00.000Z',
+        updatedAt: '2026-05-27T10:00:00.000Z'
+      }
+    ];
+    const api = installBridge(state);
+    const user = userEvent.setup();
+    render(<App />);
+
+    expect(await screen.findByText('Повторно открытый флуд')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /AI/ }));
+    expect(await screen.findByText('Активный AI топик')).toBeInTheDocument();
+
+    api.getTelegramThread.mockClear();
+    await user.click(screen.getByRole('button', { name: /Флуд/ }));
+
+    await waitFor(() =>
+      expect(api.getTelegramThread).toHaveBeenCalledWith({
+        chatId: 'chat_1',
+        topicId: 'chat_1:topic:101',
+        limit: 50
+      })
+    );
+    expect(await screen.findByText('Повторно открытый флуд')).toBeInTheDocument();
   });
 
   it('creates a Redmine issue from a My Tasks column', async () => {
