@@ -92,6 +92,27 @@ describe('TelegramInboxService', () => {
 
   it('marks a thread read only when explicitly requested', async () => {
     const client = new FakeTdlibClient();
+    client.replyTo('getChatHistory', {
+      '@type': 'messages',
+      total_count: 2,
+      messages: [{
+        '@type': 'message',
+        id: 7,
+        chat_id: 42,
+        date: 1780657200,
+        is_outgoing: false,
+        sender_id: { '@type': 'messageSenderUser', user_id: 9 },
+        content: { '@type': 'messageText', text: { text: 'Need QA' } }
+      }, {
+        '@type': 'message',
+        id: 8,
+        chat_id: 42,
+        date: 1780657210,
+        is_outgoing: false,
+        sender_id: { '@type': 'messageSenderUser', user_id: 9 },
+        content: { '@type': 'messageText', text: { text: 'Follow-up' } }
+      }]
+    });
     client.replyTo('viewMessages', { '@type': 'ok' });
     client.replyTo('getChats', { '@type': 'chats', chat_ids: [], total_count: 0 });
     const service = new TelegramInboxService(client, new InMemoryTelegramInboxRepository());
@@ -99,10 +120,66 @@ describe('TelegramInboxService', () => {
     await service.markThreadRead({ chatId: '42', topicId: null });
 
     expect(client.sentRequests()[0]).toMatchObject({
+      '@type': 'getChatHistory',
+      chat_id: 42,
+      limit: 100
+    });
+    expect(client.sentRequests()[1]).toMatchObject({
       '@type': 'viewMessages',
       chat_id: 42,
+      message_ids: [7, 8],
       force_read: true
     });
+  });
+
+  it('marks a topic thread read using concrete message ids from topic history', async () => {
+    const client = new FakeTdlibClient();
+    client.replyTo('getMessageThreadHistory', {
+      '@type': 'messages',
+      total_count: 1,
+      messages: [{
+        '@type': 'message',
+        id: 8,
+        chat_id: 42,
+        date: 1780657210,
+        is_outgoing: false,
+        sender_id: { '@type': 'messageSenderUser', user_id: 9 },
+        content: { '@type': 'messageText', text: { text: 'Topic reply' } }
+      }]
+    });
+    client.replyTo('viewMessages', { '@type': 'ok' });
+    client.replyTo('getChats', { '@type': 'chats', chat_ids: [], total_count: 0 });
+    const service = new TelegramInboxService(client, new InMemoryTelegramInboxRepository());
+
+    await service.markThreadRead({ chatId: '42', topicId: '100' });
+
+    expect(client.sentRequests()[0]).toMatchObject({
+      '@type': 'getMessageThreadHistory',
+      chat_id: 42,
+      message_id: 100,
+      limit: 100
+    });
+    expect(client.sentRequests()[1]).toMatchObject({
+      '@type': 'viewMessages',
+      chat_id: 42,
+      message_ids: [8],
+      force_read: true
+    });
+  });
+
+  it('does not send viewMessages when the thread has no concrete message ids', async () => {
+    const client = new FakeTdlibClient();
+    client.replyTo('getChatHistory', {
+      '@type': 'messages',
+      total_count: 0,
+      messages: []
+    });
+    client.replyTo('getChats', { '@type': 'chats', chat_ids: [], total_count: 0 });
+    const service = new TelegramInboxService(client, new InMemoryTelegramInboxRepository());
+
+    await service.markThreadRead({ chatId: '42', topicId: null });
+
+    expect(client.sentRequests().map((request) => request['@type'])).toEqual(['getChatHistory', 'getChats']);
   });
 
   it('loads a topic thread with getMessageThreadHistory', async () => {

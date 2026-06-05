@@ -72,13 +72,18 @@ export class TelegramInboxService {
   }
 
   async markThreadRead(payload: TelegramThreadKey): Promise<TelegramInboxSnapshot> {
-    // First migration scope uses chat-level viewMessages; topic-aware TDLib read handling can be added later.
-    await this.client.send({
-      '@type': 'viewMessages',
-      chat_id: Number(payload.chatId),
-      message_ids: [],
-      force_read: true
-    });
+    const history = await this.loadHistory({ ...payload, limit: 100 });
+    const messageIds = history.messages
+      .map((message) => Number(message.id))
+      .filter((messageId) => Number.isFinite(messageId));
+    if (messageIds.length > 0) {
+      await this.client.send({
+        '@type': 'viewMessages',
+        chat_id: Number(payload.chatId),
+        message_ids: messageIds,
+        force_read: true
+      });
+    }
     return this.getInboxSnapshot();
   }
 

@@ -93,6 +93,7 @@ export function Inbox({
   const [renderedMessageLimit, setRenderedMessageLimit] = useState(initialRenderedMessageLimit);
   const threadRef = useRef<HTMLDivElement | null>(null);
   const markedReadThreadRef = useRef('');
+  const markingReadThreadRef = useRef('');
   const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const topicTabsRef = useRef<HTMLDivElement | null>(null);
   const previousScrollHeight = useRef<number | null>(null);
@@ -205,12 +206,21 @@ export function Inbox({
     }
 
     const marker = `${key.chatId}:${key.topicId ?? ''}:${newestMessageId}`;
-    if (markedReadThreadRef.current === marker) {
+    if (markedReadThreadRef.current === marker || markingReadThreadRef.current === marker) {
       return;
     }
 
-    markedReadThreadRef.current = marker;
-    void markThreadRead(key);
+    markingReadThreadRef.current = marker;
+    void markThreadRead(key)
+      .then(() => {
+        markedReadThreadRef.current = marker;
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (markingReadThreadRef.current === marker) {
+          markingReadThreadRef.current = '';
+        }
+      });
   }
 
   function scheduleThreadScrollToBottom(frameCount = 2) {
@@ -225,7 +235,6 @@ export function Inbox({
           scrollOnFrame(remainingFrames - 1);
           return;
         }
-        maybeMarkThreadRead();
         bottomScrollFrameRef.current = null;
       });
     };
@@ -254,7 +263,6 @@ export function Inbox({
     }
 
     thread.scrollTop = thread.scrollHeight;
-    window.requestAnimationFrame(maybeMarkThreadRead);
   }, [selectedChatId, selectedTopicId, newestMessageId, renderedMessages.length]);
 
   useEffect(() => {

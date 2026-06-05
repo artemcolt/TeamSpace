@@ -147,6 +147,52 @@ function setThreadScrollMetrics(
   });
 }
 
+function installThreadScrollPrototypeMetrics(metrics: {
+  scrollHeight: number;
+  clientHeight: number;
+  initialScrollTop: number;
+}) {
+  let scrollTop = metrics.initialScrollTop;
+  const prototype = HTMLElement.prototype;
+  const scrollHeightDescriptor = Object.getOwnPropertyDescriptor(prototype, 'scrollHeight');
+  const clientHeightDescriptor = Object.getOwnPropertyDescriptor(prototype, 'clientHeight');
+  const scrollTopDescriptor = Object.getOwnPropertyDescriptor(prototype, 'scrollTop');
+
+  Object.defineProperty(prototype, 'scrollHeight', {
+    configurable: true,
+    get: () => metrics.scrollHeight
+  });
+  Object.defineProperty(prototype, 'clientHeight', {
+    configurable: true,
+    get: () => metrics.clientHeight
+  });
+  Object.defineProperty(prototype, 'scrollTop', {
+    configurable: true,
+    get: () => scrollTop,
+    set: (value) => {
+      scrollTop = value;
+    }
+  });
+
+  return () => {
+    if (scrollHeightDescriptor) {
+      Object.defineProperty(prototype, 'scrollHeight', scrollHeightDescriptor);
+    } else {
+      delete (prototype as unknown as Record<string, unknown>).scrollHeight;
+    }
+    if (clientHeightDescriptor) {
+      Object.defineProperty(prototype, 'clientHeight', clientHeightDescriptor);
+    } else {
+      delete (prototype as unknown as Record<string, unknown>).clientHeight;
+    }
+    if (scrollTopDescriptor) {
+      Object.defineProperty(prototype, 'scrollTop', scrollTopDescriptor);
+    } else {
+      delete (prototype as unknown as Record<string, unknown>).scrollTop;
+    }
+  };
+}
+
 function installBridge(initialState: AppState) {
   let state = initialState;
   const telegramInboxSnapshot = (): TelegramInboxSnapshot => {
@@ -1094,6 +1140,37 @@ describe('App', () => {
     }
   });
 
+  it('does not mark Telegram thread read from programmatic open scroll at the bottom', async () => {
+    const state = connectedState();
+    const api = installBridge(state);
+    const hasFocus = vi.spyOn(document, 'hasFocus').mockReturnValue(true);
+    const restoreScrollMetrics = installThreadScrollPrototypeMetrics({
+      scrollHeight: 1000,
+      clientHeight: 400,
+      initialScrollTop: 600
+    });
+
+    try {
+      render(<App />);
+
+      await waitFor(() =>
+        expect(api.getTelegramThread).toHaveBeenCalledWith({
+          chatId: 'chat_1',
+          topicId: null,
+          limit: 50
+        })
+      );
+      await act(async () => {
+        await new Promise((resolve) => window.setTimeout(resolve, 50));
+      });
+
+      expect(api.markTelegramThreadRead).not.toHaveBeenCalled();
+    } finally {
+      restoreScrollMetrics();
+      hasFocus.mockRestore();
+    }
+  });
+
   it('does not repeatedly mark the same Telegram thread and newest message read', async () => {
     const state = connectedState();
     const api = installBridge(state);
@@ -1115,6 +1192,129 @@ describe('App', () => {
       fireEvent.scroll(thread as Element);
 
       expect(api.markTelegramThreadRead).toHaveBeenCalledTimes(1);
+    } finally {
+      hasFocus.mockRestore();
+    }
+  });
+
+  it('merges returned read snapshot into Telegram counts without dropping full chat fields', async () => {
+    const state = connectedState();
+    state.telegram.chats[0] = {
+      ...state.telegram.chats[0],
+      lastMessageAt: null,
+      lastSyncedAt: '2026-05-27T10:00:00.000Z',
+      unreadCount: 1
+    };
+    state.telegram.messages = [];
+    const threadMessage: TelegramMessage = {
+      id: 'chat_1:10',
+      chatId: 'chat_1',
+      topicId: null,
+      senderId: 'user_1',
+      senderName: 'Анна',
+      senderAvatar: null,
+      sentAt: '2026-05-27T10:00:00.000Z',
+      text: 'Thread-only unread message.',
+      status: 'new',
+      createdAt: '2026-05-27T10:00:00.000Z',
+      updatedAt: '2026-05-27T10:00:00.000Z'
+    };
+    const api = installBridge(state);
+    api.getTelegramThread.mockResolvedValue({
+      key: { chatId: 'chat_1', topicId: null },
+      messages: [threadMessage],
+      hasOlder: false,
+      loading: false
+    });
+    api.markTelegramThreadRead.mockResolvedValueOnce({
+      status: 'connected',
+      phoneMasked: '+10***00',
+      chats: [{
+        id: 'chat_1',
+        title: 'Backend Team',
+        type: 'group',
+        avatar: null,
+        selected: true,
+        notificationsEnabled: true,
+        hasTopics: false,
+        unreadCount: 0,
+        lastMessageAt: null
+      }],
+      topics: [],
+      unread: {
+        selectedUnreadCount: 0,
+        notifyingUnreadCount: 0
+      },
+      error: null
+    });
+    const hasFocus = vi.spyOn(document, 'hasFocus').mockReturnValue(true);
+    const { container } = render(<App />);
+
+    try {
+      expect(await screen.findByText('Thread-only unread message.')).toBeInTheDocument();
+      expect(screen.getByText('1', { selector: '.unread-badge' })).toBeInTheDocument();
+      const thread = container.querySelector('.telegram-thread');
+      expect(thread).not.toBeNull();
+      setThreadScrollMetrics(thread as Element, {
+        scrollHeight: 1000,
+        clientHeight: 400,
+        scrollTop: 600
+      });
+
+      fireEvent.scroll(thread as Element);
+
+      await waitFor(() => expect(api.markTelegramThreadRead).toHaveBeenCalledTimes(1));
+      await waitFor(() => expect(screen.queryByText('1', { selector: '.unread-badge' })).not.toBeInTheDocument());
+      expect(screen.getByText('13:00')).toBeInTheDocument();
+    } finally {
+      hasFocus.mockRestore();
+    }
+  });
+
+  it('retries marking a Telegram thread read after a failed bottom-scroll attempt', async () => {
+    const state = connectedState();
+    const api = installBridge(state);
+    api.markTelegramThreadRead
+      .mockRejectedValueOnce(new Error('TDLib read failed'))
+      .mockResolvedValueOnce({
+        status: 'connected',
+        phoneMasked: '+10***00',
+        chats: [{
+          id: 'chat_1',
+          title: 'Backend Team',
+          type: 'group',
+          avatar: null,
+          selected: true,
+          notificationsEnabled: true,
+          hasTopics: false,
+          unreadCount: 0,
+          lastMessageAt: '2026-05-27T10:00:00.000Z'
+        }],
+        topics: [],
+        unread: {
+          selectedUnreadCount: 0,
+          notifyingUnreadCount: 0
+        },
+        error: null
+      });
+    const hasFocus = vi.spyOn(document, 'hasFocus').mockReturnValue(true);
+    const { container } = render(<App />);
+
+    try {
+      await waitFor(() => expect(api.getTelegramThread).toHaveBeenCalled());
+      const thread = container.querySelector('.telegram-thread');
+      expect(thread).not.toBeNull();
+      setThreadScrollMetrics(thread as Element, {
+        scrollHeight: 1000,
+        clientHeight: 400,
+        scrollTop: 600
+      });
+
+      fireEvent.scroll(thread as Element);
+      await waitFor(() => expect(api.markTelegramThreadRead).toHaveBeenCalledTimes(1));
+      fireEvent.scroll(thread as Element);
+
+      await waitFor(() => expect(api.markTelegramThreadRead).toHaveBeenCalledTimes(2));
     } finally {
       hasFocus.mockRestore();
     }

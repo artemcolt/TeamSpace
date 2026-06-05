@@ -279,6 +279,74 @@ export function App() {
     return topicId && topicId !== 'all' ? topicId : null;
   }
 
+  function snapshotConnectionStatus(status: TelegramInboxSnapshot['status']): ConnectionStatus {
+    return status === 'connecting' ? 'disconnected' : status;
+  }
+
+  function mergeTelegramInboxSnapshot(currentState: AppState, snapshot: TelegramInboxSnapshot): AppState {
+    const snapshotChatsById = new Map(snapshot.chats.map((chat) => [chat.id, chat]));
+    const knownChatIds = new Set(currentState.telegram.chats.map((chat) => chat.id));
+    const chats = currentState.telegram.chats.map((chat) => {
+      const summary = snapshotChatsById.get(chat.id);
+      return summary
+        ? {
+            ...chat,
+            title: summary.title,
+            type: summary.type,
+            avatar: summary.avatar,
+            selected: summary.selected,
+            notificationsEnabled: summary.notificationsEnabled,
+            hasTopics: summary.hasTopics,
+            unreadCount: summary.unreadCount,
+            lastMessageAt: summary.lastMessageAt
+          }
+        : chat;
+    });
+    for (const summary of snapshot.chats) {
+      if (!knownChatIds.has(summary.id)) {
+        chats.push({
+          ...summary,
+          lastSyncedAt: null
+        });
+      }
+    }
+
+    const snapshotTopicsById = new Map(snapshot.topics.map((topic) => [topic.id, topic]));
+    const knownTopicIds = new Set(currentState.telegram.topics.map((topic) => topic.id));
+    const topics = currentState.telegram.topics.map((topic) => {
+      const summary = snapshotTopicsById.get(topic.id);
+      return summary
+        ? {
+            ...topic,
+            chatId: summary.chatId,
+            title: summary.title,
+            unreadCount: summary.unreadCount,
+            lastMessageAt: summary.lastMessageAt
+        }
+        : topic;
+    });
+    for (const summary of snapshot.topics) {
+      if (!knownTopicIds.has(summary.id)) {
+        topics.push({
+          ...summary,
+          topMessageId: ''
+        });
+      }
+    }
+
+    return {
+      ...currentState,
+      telegram: {
+        ...currentState.telegram,
+        status: snapshotConnectionStatus(snapshot.status),
+        phoneMasked: snapshot.phoneMasked,
+        chats,
+        topics,
+        error: snapshot.error
+      }
+    };
+  }
+
   async function loadTelegramThread(chatId: string, topicId: string | null) {
     if (!chatId) {
       return null;
@@ -323,9 +391,13 @@ export function App() {
 
   async function markTelegramThreadRead(payload: TelegramThreadKey) {
     try {
-      await api.markTelegramThreadRead(payload);
+      const snapshot = await api.markTelegramThreadRead(payload);
+      setState((currentState) => currentState
+        ? mergeTelegramInboxSnapshot(currentState, snapshot)
+        : currentState);
     } catch (error) {
       notify(error instanceof Error ? error.message : 'Не удалось отметить Telegram-чат прочитанным.', 'error');
+      throw error;
     }
   }
 
