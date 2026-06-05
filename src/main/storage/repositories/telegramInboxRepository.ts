@@ -1,5 +1,13 @@
 import type { MessageStatus } from '../../domain/types';
 
+function isMessageStatus(status: unknown): status is MessageStatus {
+  return status === 'new' || status === 'ignored' || status === 'created';
+}
+
+function messageStatusOrDefault(status: unknown): MessageStatus {
+  return isMessageStatus(status) ? status : 'new';
+}
+
 export interface TelegramChatLocalState {
   selected: boolean;
   notificationsEnabled: boolean;
@@ -53,7 +61,7 @@ export class InMemoryTelegramInboxRepository implements TelegramInboxRepository 
   }
 
   setMessageStatus(record: TelegramMessageStatusRecord): void {
-    this.statuses.set(record.messageId, record.status);
+    this.statuses.set(record.messageId, messageStatusOrDefault(record.status));
   }
 }
 
@@ -66,7 +74,7 @@ export class SqlTelegramInboxRepository implements TelegramInboxRepository {
   initialize(): void {
     this.db.run('create table if not exists telegram_workspace_chats (chat_id text primary key, selected integer not null, selected_at text not null)');
     this.db.run('create table if not exists telegram_notification_settings (chat_id text primary key, enabled integer not null)');
-    this.db.run('create table if not exists telegram_message_workflow_status (message_id text primary key, chat_id text not null, topic_id text, status text not null, updated_at text not null)');
+    this.db.run("create table if not exists telegram_message_workflow_status (message_id text primary key, chat_id text not null, topic_id text, status text not null check(status in ('new', 'ignored', 'created')), updated_at text not null)");
   }
 
   selectedChatIds(): string[] {
@@ -87,7 +95,7 @@ export class SqlTelegramInboxRepository implements TelegramInboxRepository {
 
   chatLocalState(chatId: string): TelegramChatLocalState {
     return {
-      selected: this.selectedChatIds().includes(chatId),
+      selected: this.rows<{ selected: number }>('select selected from telegram_workspace_chats where chat_id = ?', [chatId]).at(0)?.selected === 1,
       notificationsEnabled: this.rows<{ enabled: number }>('select enabled from telegram_notification_settings where chat_id = ?', [chatId]).at(0)?.enabled !== 0
     };
   }
@@ -100,19 +108,24 @@ export class SqlTelegramInboxRepository implements TelegramInboxRepository {
   }
 
   messageStatus(messageId: string): MessageStatus {
-    const status = this.rows<{ status: MessageStatus }>(
+    const status = this.rows<{ status: unknown }>(
       'select status from telegram_message_workflow_status where message_id = ?',
       [messageId]
     ).at(0)?.status;
-    return status ?? 'new';
+    return messageStatusOrDefault(status);
   }
 
   setMessageStatus(record: TelegramMessageStatusRecord): void {
+    const status = messageStatusOrDefault(record.status);
     this.db.run(
       `insert into telegram_message_workflow_status (message_id, chat_id, topic_id, status, updated_at)
        values (?, ?, ?, ?, ?)
-       on conflict(message_id) do update set status = excluded.status, updated_at = excluded.updated_at`,
-      [record.messageId, record.chatId, record.topicId, record.status, new Date().toISOString()]
+       on conflict(message_id) do update set
+         chat_id = excluded.chat_id,
+         topic_id = excluded.topic_id,
+         status = excluded.status,
+         updated_at = excluded.updated_at`,
+      [record.messageId, record.chatId, record.topicId, status, new Date().toISOString()]
     );
   }
 
