@@ -24,10 +24,14 @@ import type {
   TelegramFolder,
   TelegramAttachmentDownloadPayload,
   TelegramAttachmentDownloadResult,
+  TelegramInboxSnapshot,
   TelegramMessageAttachment,
   TelegramMessageReaction,
   TelegramOutgoingFile,
   TelegramMessage,
+  TelegramThreadKey,
+  TelegramThreadRequest,
+  TelegramThreadView,
   TelegramTopic
 } from '../domain/types';
 import { LocalStore } from '../storage/localStore';
@@ -279,6 +283,54 @@ export class TelegramService {
     const nextState = await this.syncWorkspaceState(client);
     this.startRealtimeUpdates(client);
     return nextState;
+  }
+
+  async getInboxSnapshot(): Promise<TelegramInboxSnapshot> {
+    const telegram = this.store.getState().telegram;
+    const chats = telegram.chats.map((chat) => ({
+      id: chat.id,
+      title: chat.title,
+      type: chat.type,
+      avatar: chat.avatar,
+      selected: chat.selected,
+      notificationsEnabled: chat.notificationsEnabled !== false,
+      hasTopics: chat.hasTopics,
+      unreadCount: chat.unreadCount ?? 0,
+      lastMessageAt: chat.lastMessageAt
+    }));
+    const selectedUnreadCount = chats
+      .filter((chat) => chat.selected)
+      .reduce((total, chat) => total + Math.max(0, chat.unreadCount), 0);
+    const notifyingUnreadCount = chats
+      .filter((chat) => chat.selected && chat.notificationsEnabled)
+      .reduce((total, chat) => total + Math.max(0, chat.unreadCount), 0);
+    return {
+      status: telegram.status,
+      phoneMasked: telegram.phoneMasked,
+      chats,
+      topics: telegram.topics,
+      unread: { selectedUnreadCount, notifyingUnreadCount },
+      error: telegram.error
+    };
+  }
+
+  async getThread(payload: TelegramThreadRequest): Promise<TelegramThreadView> {
+    const state = await this.loadChatMessages({ chatId: payload.chatId, topicId: payload.topicId ?? undefined });
+    const messages = state.telegram.messages
+      .filter((message) => message.chatId === payload.chatId)
+      .filter((message) => !payload.topicId || message.topicId === payload.topicId)
+      .sort((a, b) => new Date(a.sentAt).getTime() - new Date(b.sentAt).getTime());
+    return {
+      key: { chatId: payload.chatId, topicId: payload.topicId },
+      messages,
+      hasOlder: messages.length >= (payload.limit ?? 50),
+      loading: false
+    };
+  }
+
+  async markThreadRead(payload: TelegramThreadKey): Promise<TelegramInboxSnapshot> {
+    await this.loadChatMessages({ chatId: payload.chatId, topicId: payload.topicId ?? undefined });
+    return this.getInboxSnapshot();
   }
 
   async loadChatMessages(payload: { chatId: string; topicId?: string }): Promise<AppState> {

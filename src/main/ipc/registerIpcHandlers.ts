@@ -36,6 +36,8 @@ import type {
   TelegramChat,
   TelegramMessage,
   TelegramOutgoingFile,
+  TelegramThreadKey,
+  TelegramThreadRequest,
   TelegramTopic
 } from '../domain/types';
 import { RedmineService } from '../redmine/redmineService';
@@ -2175,6 +2177,15 @@ export function registerIpcHandlers(
     telegram.connect(payload));
 
   ipcMain.handle('telegram:sync', () => telegram.sync());
+
+  ipcMain.handle('telegram:get-inbox-snapshot', () =>
+    telegram.getInboxSnapshot());
+
+  ipcMain.handle('telegram:get-thread', (_event, payload: TelegramThreadRequest) =>
+    telegram.getThread(payload));
+
+  ipcMain.handle('telegram:mark-thread-read', (_event, payload: TelegramThreadKey) =>
+    telegram.markThreadRead(payload));
 
   ipcMain.handle('telegram:load-chat-messages', (_event, payload: { chatId: string; topicId?: string }) =>
     telegram.loadChatMessages(payload));

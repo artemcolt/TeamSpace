@@ -120,6 +120,34 @@ function connectedState(): AppState {
 
 function installBridge(initialState: AppState) {
   let state = initialState;
+  const telegramInboxSnapshot = (): TelegramInboxSnapshot => {
+    const chats = state.telegram.chats.map((chat) => ({
+      id: chat.id,
+      title: chat.title,
+      type: chat.type,
+      avatar: chat.avatar,
+      selected: chat.selected,
+      notificationsEnabled: chat.notificationsEnabled !== false,
+      hasTopics: chat.hasTopics,
+      unreadCount: chat.unreadCount ?? 0,
+      lastMessageAt: chat.lastMessageAt
+    }));
+    return {
+      status: state.telegram.status,
+      phoneMasked: state.telegram.phoneMasked,
+      chats,
+      topics: state.telegram.topics,
+      unread: {
+        selectedUnreadCount: chats
+          .filter((chat) => chat.selected)
+          .reduce((total, chat) => total + Math.max(0, chat.unreadCount), 0),
+        notifyingUnreadCount: chats
+          .filter((chat) => chat.selected && chat.notificationsEnabled)
+          .reduce((total, chat) => total + Math.max(0, chat.unreadCount), 0)
+      },
+      error: state.telegram.error
+    };
+  };
   const api = {
     getState: vi.fn(async () => state),
     deleteLocalData: vi.fn(async () => state),
@@ -352,6 +380,17 @@ function installBridge(initialState: AppState) {
       return state;
     }),
     syncTelegram: vi.fn(async () => state),
+    getTelegramInboxSnapshot: vi.fn(async () => telegramInboxSnapshot()),
+    getTelegramThread: vi.fn(async (payload: TelegramThreadRequest): Promise<TelegramThreadView> => ({
+      key: { chatId: payload.chatId, topicId: payload.topicId },
+      messages: state.telegram.messages
+        .filter((message) => message.chatId === payload.chatId)
+        .filter((message) => !payload.topicId || message.topicId === payload.topicId)
+        .sort((a, b) => new Date(a.sentAt).getTime() - new Date(b.sentAt).getTime()),
+      hasOlder: false,
+      loading: false
+    })),
+    markTelegramThreadRead: vi.fn(async () => telegramInboxSnapshot()),
     loadChatMessages: vi.fn(async (payload: { chatId: string }) => {
       state = {
         ...state,

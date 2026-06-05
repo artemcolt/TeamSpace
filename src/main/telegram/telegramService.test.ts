@@ -52,6 +52,69 @@ describe('TelegramService stored credentials', () => {
 });
 
 describe('TelegramService workspace sync', () => {
+  it('exposes focused inbox methods during TDLib migration', async () => {
+    const store = createStore();
+    const service = new TelegramService(store);
+
+    await expect(service.getInboxSnapshot()).resolves.toMatchObject({
+      status: store.getState().telegram.status,
+      chats: [],
+      topics: [],
+      unread: { selectedUnreadCount: 0, notifyingUnreadCount: 0 }
+    });
+  });
+
+  it('counts unread inbox totals for selected notifying chats', async () => {
+    const state = defaultState();
+    state.telegram.chats = [
+      {
+        id: 'selected_notify',
+        title: 'Selected Notify',
+        type: 'group',
+        avatar: null,
+        hasTopics: false,
+        selected: true,
+        notificationsEnabled: true,
+        lastSyncedAt: null,
+        lastMessageAt: '2026-06-01T10:00:00.000Z',
+        unreadCount: 3
+      },
+      {
+        id: 'selected_muted',
+        title: 'Selected Muted',
+        type: 'group',
+        avatar: null,
+        hasTopics: false,
+        selected: true,
+        notificationsEnabled: false,
+        lastSyncedAt: null,
+        lastMessageAt: '2026-06-01T10:30:00.000Z',
+        unreadCount: 5
+      },
+      {
+        id: 'unselected_notify',
+        title: 'Unselected Notify',
+        type: 'group',
+        avatar: null,
+        hasTopics: false,
+        selected: false,
+        notificationsEnabled: true,
+        lastSyncedAt: null,
+        lastMessageAt: '2026-06-01T11:00:00.000Z',
+        unreadCount: 7
+      }
+    ];
+    const store = createStore(state);
+    const service = new TelegramService(store);
+
+    await expect(service.getInboxSnapshot()).resolves.toMatchObject({
+      unread: {
+        selectedUnreadCount: 8,
+        notifyingUnreadCount: 3
+      }
+    });
+  });
+
   it('keeps selected cached chats when Telegram does not return them in the dialog batch', async () => {
     const state = defaultState();
     state.telegram.chats = [

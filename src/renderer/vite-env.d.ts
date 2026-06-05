@@ -112,6 +112,9 @@ interface TeamSpaceBridge {
     }) => Promise<AppState>;
     connectTelegram: (payload: { code: string; password?: string }) => Promise<AppState>;
     syncTelegram: () => Promise<AppState>;
+    getTelegramInboxSnapshot: () => Promise<TelegramInboxSnapshot>;
+    getTelegramThread: (payload: TelegramThreadRequest) => Promise<TelegramThreadView>;
+    markTelegramThreadRead: (payload: TelegramThreadKey) => Promise<TelegramInboxSnapshot>;
     loadChatMessages: (payload: { chatId: string; topicId?: string }) => Promise<AppState>;
     loadOlderChatMessages: (payload: { chatId: string; topicId?: string; beforeMessageId: string }) => Promise<AppState>;
     sendTelegramMessage: (payload: { chatId: string; topicId?: string; replyToMessageId?: string; text: string; file?: TelegramOutgoingFile; image?: TelegramOutgoingFile }) => Promise<AppState>;
@@ -364,6 +367,78 @@ interface TelegramMessage {
   status: MessageStatus;
   createdAt: string;
   updatedAt: string;
+}
+
+interface TelegramChatSummary {
+  id: string;
+  title: string;
+  type: TelegramChat['type'];
+  avatar: string | null;
+  selected: boolean;
+  notificationsEnabled: boolean;
+  hasTopics: boolean;
+  unreadCount: number;
+  lastMessageAt: string | null;
+}
+
+interface TelegramTopicSummary {
+  id: string;
+  chatId: string;
+  title: string;
+  unreadCount: number;
+  lastMessageAt: string | null;
+}
+
+interface TelegramUnreadSummary {
+  selectedUnreadCount: number;
+  notifyingUnreadCount: number;
+}
+
+interface TelegramThreadKey {
+  chatId: string;
+  topicId: string | null;
+}
+
+interface TelegramThreadRequest extends TelegramThreadKey {
+  limit?: number;
+}
+
+interface TelegramThreadPageRequest extends TelegramThreadKey {
+  beforeMessageId: string;
+  limit?: number;
+}
+
+interface TelegramMessageView extends TelegramMessage {
+  deliveryStatus?: 'sending' | 'failed' | 'sent';
+}
+
+interface TelegramThreadView {
+  key: TelegramThreadKey;
+  messages: TelegramMessageView[];
+  hasOlder: boolean;
+  loading: boolean;
+}
+
+interface TelegramInboxSnapshot {
+  status: 'disconnected' | 'connecting' | 'connected' | 'error';
+  phoneMasked: string | null;
+  chats: TelegramChatSummary[];
+  topics: TelegramTopicSummary[];
+  unread: TelegramUnreadSummary;
+  error: string | null;
+}
+
+interface TelegramSendMessagePayload extends TelegramThreadKey {
+  replyToMessageId?: string;
+  text: string;
+  file?: TelegramOutgoingFile;
+  image?: TelegramOutgoingFile;
+  clientRequestId?: string;
+}
+
+interface TelegramSendResult {
+  clientRequestId: string;
+  thread: TelegramThreadView;
 }
 
 interface TelegramMessageReaction {

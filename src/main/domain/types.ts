@@ -90,6 +90,78 @@ export interface TelegramMessage {
   updatedAt: string;
 }
 
+export interface TelegramChatSummary {
+  id: string;
+  title: string;
+  type: TelegramChat['type'];
+  avatar: string | null;
+  selected: boolean;
+  notificationsEnabled: boolean;
+  hasTopics: boolean;
+  unreadCount: number;
+  lastMessageAt: string | null;
+}
+
+export interface TelegramTopicSummary {
+  id: string;
+  chatId: string;
+  title: string;
+  unreadCount: number;
+  lastMessageAt: string | null;
+}
+
+export interface TelegramUnreadSummary {
+  selectedUnreadCount: number;
+  notifyingUnreadCount: number;
+}
+
+export interface TelegramThreadKey {
+  chatId: string;
+  topicId: string | null;
+}
+
+export interface TelegramThreadRequest extends TelegramThreadKey {
+  limit?: number;
+}
+
+export interface TelegramThreadPageRequest extends TelegramThreadKey {
+  beforeMessageId: string;
+  limit?: number;
+}
+
+export interface TelegramMessageView extends TelegramMessage {
+  deliveryStatus?: 'sending' | 'failed' | 'sent';
+}
+
+export interface TelegramThreadView {
+  key: TelegramThreadKey;
+  messages: TelegramMessageView[];
+  hasOlder: boolean;
+  loading: boolean;
+}
+
+export interface TelegramInboxSnapshot {
+  status: 'disconnected' | 'connecting' | 'connected' | 'error';
+  phoneMasked: string | null;
+  chats: TelegramChatSummary[];
+  topics: TelegramTopicSummary[];
+  unread: TelegramUnreadSummary;
+  error: string | null;
+}
+
+export interface TelegramSendMessagePayload extends TelegramThreadKey {
+  replyToMessageId?: string;
+  text: string;
+  file?: TelegramOutgoingFile;
+  image?: TelegramOutgoingFile;
+  clientRequestId?: string;
+}
+
+export interface TelegramSendResult {
+  clientRequestId: string;
+  thread: TelegramThreadView;
+}
+
 export interface RedmineOption {
   id: string;
   name: string;

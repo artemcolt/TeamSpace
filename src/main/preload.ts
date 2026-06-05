@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron';
+import type { TelegramThreadKey, TelegramThreadRequest } from './domain/types';
 
 contextBridge.exposeInMainWorld('teamSpace', {
   platform: process.platform,
@@ -155,6 +156,11 @@ contextBridge.exposeInMainWorld('teamSpace', {
     connectTelegram: (payload: { code: string; password?: string }) =>
       ipcRenderer.invoke('telegram:connect', payload),
     syncTelegram: () => ipcRenderer.invoke('telegram:sync'),
+    getTelegramInboxSnapshot: () => ipcRenderer.invoke('telegram:get-inbox-snapshot'),
+    getTelegramThread: (payload: TelegramThreadRequest) =>
+      ipcRenderer.invoke('telegram:get-thread', payload),
+    markTelegramThreadRead: (payload: TelegramThreadKey) =>
+      ipcRenderer.invoke('telegram:mark-thread-read', payload),
     loadChatMessages: (payload: { chatId: string; topicId?: string }) =>
       ipcRenderer.invoke('telegram:load-chat-messages', payload),
     loadOlderChatMessages: (payload: { chatId: string; topicId?: string; beforeMessageId: string }) =>
