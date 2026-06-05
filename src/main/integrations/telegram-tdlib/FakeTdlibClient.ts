@@ -1,6 +1,10 @@
 import type { TdlibClient } from './TdlibClient';
 import type { TdlibRequest, TdlibResponse, TdlibUpdate } from './tdlibTypes';
 
+function cloneTdlibValue<T>(value: T): T {
+  return structuredClone(value);
+}
+
 export class FakeTdlibClient implements TdlibClient {
   private readonly requests: TdlibRequest[] = [];
   private readonly responses = new Map<string, TdlibResponse[]>();
@@ -11,30 +15,31 @@ export class FakeTdlibClient implements TdlibClient {
   async stop(): Promise<void> {}
 
   async send<T extends TdlibResponse = TdlibResponse>(request: TdlibRequest): Promise<T> {
-    this.requests.push(request);
+    this.requests.push(cloneTdlibValue(request));
     const queue = this.responses.get(request['@type']) ?? [];
     const response = queue.shift();
     if (!response) {
       throw new Error(`No fake TDLib response for ${request['@type']}`);
     }
-    return response as T;
+    return cloneTdlibValue(response) as T;
   }
 
   async receive(): Promise<TdlibUpdate | null> {
-    return this.updates.shift() ?? null;
+    const update = this.updates.shift();
+    return update ? cloneTdlibValue(update) : null;
   }
 
   replyTo(type: string, response: TdlibResponse): void {
     const queue = this.responses.get(type) ?? [];
-    queue.push(response);
+    queue.push(cloneTdlibValue(response));
     this.responses.set(type, queue);
   }
 
   pushUpdate(update: TdlibUpdate): void {
-    this.updates.push(update);
+    this.updates.push(cloneTdlibValue(update));
   }
 
   sentRequests(): TdlibRequest[] {
-    return structuredClone(this.requests);
+    return cloneTdlibValue(this.requests);
   }
 }

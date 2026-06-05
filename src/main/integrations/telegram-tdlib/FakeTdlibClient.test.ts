@@ -23,4 +23,31 @@ describe('FakeTdlibClient', () => {
       authorization_state: { '@type': 'authorizationStateReady' }
     });
   });
+
+  it('isolates fake state from external object mutations', async () => {
+    const client = new FakeTdlibClient();
+    const request = { '@type': 'getChats', limit: 20 };
+    const response = { '@type': 'chats', chat_ids: ['1'], total_count: 1 };
+    const update = { '@type': 'updateNewMessage', message: { id: 1, content: { '@type': 'messageText', text: 'initial' } } };
+
+    client.replyTo('getChats', response);
+    client.pushUpdate(update);
+
+    const sendPromise = client.send(request);
+    request.limit = 50;
+    response.chat_ids.push('2');
+    response.total_count = 2;
+    update.message.content.text = 'mutated';
+
+    await expect(sendPromise).resolves.toEqual({
+      '@type': 'chats',
+      chat_ids: ['1'],
+      total_count: 1
+    });
+    await expect(client.receive()).resolves.toEqual({
+      '@type': 'updateNewMessage',
+      message: { id: 1, content: { '@type': 'messageText', text: 'initial' } }
+    });
+    expect(client.sentRequests()).toEqual([{ '@type': 'getChats', limit: 20 }]);
+  });
 });
